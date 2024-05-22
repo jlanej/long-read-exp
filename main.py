@@ -5,8 +5,12 @@ import pysam
 import argparse
 import pandas as pd
 from genomicranges import GenomicRanges
+import dash_bio as dashbio
+from dash import Dash, html, Input, Output, callback
+import urllib.request as urlreq
 
 utility_list = ['create_aligned_fasta']
+
 
 # extract all the reads from the alignment file to a list
 def extract_reads(alignment_file):
@@ -76,14 +80,35 @@ def harmonize_sequences(gr, gr_reduce):
     return gr
 
 
-def create_aligned_fasta(alignment_file):
+def create_aligned_fasta(alignment_file, output_file):
     reads = extract_reads(alignment_file)
     gr, gr_reduce = convert_to_range(reads)
     gr = harmonize_sequences(gr, gr_reduce)
+    out = open(output_file, 'w')
     for i in range(len(gr)):
-        print('>' + gr.get_seqnames()[0] + ':' + str(gr.get_start()[0]) + '-' + str(gr.get_end()[0]) + ':' +
-              str(gr.get_strand()) + ':' + gr.mcols.get_column('read_name')[i])
-        print(gr.mcols.get_column('sequence')[i])
+        # print('>' + gr.get_seqnames()[0] + ':' + str(gr.get_start()[0]) + '-' + str(gr.get_end()[0]) + ':' +
+        #       str(gr.get_strand()) + ':' + gr.mcols.get_column('read_name')[i])
+        # print(gr.mcols.get_column('sequence')[i])
+        #     print to output file
+        out.write('>' + gr.get_seqnames()[0] + ':' + str(gr.get_start()[0]) + '-' + str(gr.get_end()[0]) + ':' +
+                  str(gr.get_strand()) + ':' + gr.mcols.get_column('read_name')[i] + '\n')
+        out.write(gr.mcols.get_column('sequence')[i] + '\n')
+    out.close()
+
+
+def load_data(output_file):
+    data = open(output_file, 'r').read()
+    return data
+
+
+@callback(
+    Output('default-alignment-viewer-output', 'children'),
+    Input('my-default-alignment-viewer', 'eventDatum')
+)
+def update_output(value):
+    if value is None:
+        return 'No data.'
+    return str(value)
 
 
 if __name__ == '__main__':
@@ -92,9 +117,24 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Utilities for long read sequencing data analysis')
     parser.add_argument('utility', type=str, help="Utility to use,options are: " + ', '.join(utility_list) + '.')
     parser.add_argument('alignment_file', type=str, help='Alignment file')
+    # ouput file
+    parser.add_argument('output_file', type=str, help='Output file')
     args = parser.parse_args()
 
     if args.utility == utility_list[0]:
         # log the utility being used to stderr
         sys.stderr.write('Using utility: ' + args.utility + '\n')
-        create_aligned_fasta(args.alignment_file)
+        create_aligned_fasta(args.alignment_file, args.output_file)
+
+    app = Dash(__name__)
+
+    app.layout = html.Div([
+        dashbio.AlignmentChart(
+            id='my-default-alignment-viewer',
+            data=load_data(args.output_file),
+            height=900,
+            tilewidth=30,
+        ),
+        html.Div(id='default-alignment-viewer-output')
+    ])
+    app.run(debug=True)
