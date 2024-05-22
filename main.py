@@ -69,12 +69,15 @@ def harmonize_sequences(gr, gr_reduce):
         current_sequence = gr.mcols.get_column('sequence')[i]
         effective_end = start + len(current_sequence)
         if start > all_start:
-            current_sequence = 'N' * (start - all_start) + current_sequence
+            current_sequence = '.' * (start - all_start) + current_sequence
         if effective_end < all_end:
-            current_sequence = current_sequence + 'N' * (all_end - effective_end)
+            current_sequence = current_sequence + '.' * (all_end - effective_end)
         if len(current_sequence) != all_end - all_start:
             sys.stderr.write('Error: Sequence length does not match\n')
             sys.exit(1)
+        # trim the sequence to 10000 bases on either side of the middle of the full range
+        # middle = (all_end - all_start) // 2
+        # current_sequence = current_sequence[middle - 1000:middle + 1000]
         gr.mcols.get_column('sequence')[i] = current_sequence
 
     return gr
@@ -86,18 +89,19 @@ def create_aligned_fasta(alignment_file, output_file):
     gr = harmonize_sequences(gr, gr_reduce)
     out = open(output_file, 'w')
     for i in range(len(gr)):
-        # print('>' + gr.get_seqnames()[0] + ':' + str(gr.get_start()[0]) + '-' + str(gr.get_end()[0]) + ':' +
-        #       str(gr.get_strand()) + ':' + gr.mcols.get_column('read_name')[i])
-        # print(gr.mcols.get_column('sequence')[i])
-        #     print to output file
         out.write('>' + gr.get_seqnames()[0] + ':' + str(gr.get_start()[0]) + '-' + str(gr.get_end()[0]) + ':' +
-                  str(gr.get_strand()) + ':' + gr.mcols.get_column('read_name')[i] + '\n')
+                  str(gr.get_strand()[i]) + ':' + gr.mcols.get_column('read_name')[i] + '\n')
         out.write(gr.mcols.get_column('sequence')[i] + '\n')
     out.close()
 
 
 def load_data(output_file):
     data = open(output_file, 'r').read()
+    # subset to the first 10 lines
+    data = data.split('\n')[0:10]
+    # data = urlreq.urlopen(
+    #     'https://git.io/alignment_viewer_p53.fasta'
+    # ).read().decode('utf-8')
     return data
 
 
@@ -133,6 +137,7 @@ if __name__ == '__main__':
             id='my-default-alignment-viewer',
             data=load_data(args.output_file),
             height=900,
+            colorscale='nucleotide',
             tilewidth=30,
         ),
         html.Div(id='default-alignment-viewer-output')
