@@ -1,8 +1,5 @@
-# utilities for long read sequencing data analysis
-import os
 import sys
 import pysam
-import cigar
 import argparse
 import pandas as pd
 from genomicranges import GenomicRanges
@@ -53,6 +50,9 @@ def convert_to_range(reads):
 # plot alignments as rectangles on a plot, one rectangle per read,
 # with the read name on the y-axis and the rectangle spanning the start and end of the read
 
+def define_best_haplotype(gr1, gr2):
+
+
 def plot_alignments(gr,gr_reduce):
     fig, ax = plt.subplots()
     for i in range(len(gr)):
@@ -61,6 +61,23 @@ def plot_alignments(gr,gr_reduce):
     ax.set_xlim(gr_reduce.get_start()[0], gr_reduce.get_end()[0])
     ax.set_ylim(0, len(gr))
     plt.show()
+
+def plot_haplotypes(gr1, gr2, gr_reduce1, gr_reduce2, gr_original, gr_reduce_original):
+    fig, ax = plt.subplots(2)
+    for i in range(len(gr1)):
+        ax[0].add_patch(plt.Rectangle((gr1.get_start()[i], i - 0.4), gr1.get_width()[i], 0.8, color='blue'))
+    for i in range(len(gr2)):
+        ax[0].add_patch(plt.Rectangle((gr2.get_start()[i], -1*i + 0.4), gr2.get_width()[i], 0.8, color='red'))
+    ax[0].set_xlim(min(gr_reduce1.get_start()[0], gr_reduce2.get_start()[0]),
+                max(gr_reduce1.get_end()[0], gr_reduce2.get_end()[0]))
+    ax[0].set_ylim(-len(gr2), len(gr1))
+
+    for i in range(len(gr_original)):
+        ax[1].add_patch(plt.Rectangle((gr_original.get_start()[i], i - 0.4), gr_original.get_width()[i], 0.8, color='green'))
+    ax[1].set_xlim(gr_reduce_original.get_start()[0], gr_reduce_original.get_end()[0])
+    ax[1].set_ylim(0, len(gr_original))
+    plt.show()
+
 
 def parse_haplotype(haplotype_file):
     reads = extract_reads(haplotype_file)
@@ -75,14 +92,15 @@ if __name__ == '__main__':
     parser.add_argument('utility', type=str, help="Utility to use,options are: " + ', '.join(utility_list) + '.')
     parser.add_argument('haplotype1', type=str, help='Alignment file for haplotype 1')
     parser.add_argument('haplotype2', type=str, help='Alignment file for haplotype 2')
-    # output file
-    parser.add_argument('output_file', type=str, help='Output file')
+    parser.add_argument('original_alignment', type=str, help='Alignment file for original reads')
+
     args = parser.parse_args()
 
     if args.utility == utility_list[0]:
         # log the utility being used to stderr
         sys.stderr.write('Using utility: ' + args.utility + '\n')
-        reads = extract_reads(args.alignment_file)
-        gr, gr_reduce = convert_to_range(reads)
-        plot_alignments(gr, gr_reduce)
+        gr1, gr_reduce1 = parse_haplotype(args.haplotype1)
+        gr2, gr_reduce2 = parse_haplotype(args.haplotype2)
+        gr_original, gr_reduce_original = parse_haplotype(args.original_alignment)
+        plot_haplotypes(gr1, gr2, gr_reduce1, gr_reduce2, gr_original, gr_reduce_original)
 
