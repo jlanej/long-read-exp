@@ -2,6 +2,7 @@
 import os
 import sys
 import pysam
+import cigar
 import argparse
 import pandas as pd
 from genomicranges import GenomicRanges
@@ -62,22 +63,35 @@ def harmonize_sequences(gr, gr_reduce):
     all_start = gr_reduce.get_start()[0]
     all_end = gr_reduce.get_end()[0]
     gr.mcols.set_column('original_sequence', gr.mcols.get_column('sequence'), in_place=True)
-    harmonized_sequences = []
+
     for i in range(len(gr)):
+        cigars = cigar.Cigar(gr.mcols.get_column('cigar')[i])
         start = gr.get_start()[i]
-        end = gr.get_end()[i]
         current_sequence = gr.mcols.get_column('sequence')[i]
-        effective_end = start + len(current_sequence)
+        num_Ns = start - all_start
         if start > all_start:
-            current_sequence = '.' * (start - all_start) + current_sequence
+            current_sequence = '.' * num_Ns + current_sequence
+
+        indexToInsert =num_Ns
+        for c in cigars.items():
+        #     if the operation consumes the reference genome but not the read, add "." to the read sequence
+        #     to match the reference genome
+            if c[1] in ['D']:
+                current_sequence = current_sequence[:indexToInsert] + '.' * c[0] + current_sequence[indexToInsert:]
+                indexToInsert += c[0]
+        effective_end = len(current_sequence)
+
         if effective_end < all_end:
             current_sequence = current_sequence + '.' * (all_end - effective_end)
-        if len(current_sequence) != all_end - all_start:
-            sys.stderr.write('Error: Sequence length does not match\n')
+        if len(current_sequence) < all_end - all_start:
+            sys.stderr.write('Error: Sequence length too short\n')
+            # print the sequence length and the expected length
+            print(effective_end)
+            print(len(current_sequence), all_end - all_start, file=sys.stderr)
             sys.exit(1)
         # trim the sequence to 10000 bases on either side of the middle of the full range
-        # middle = (all_end - all_start) // 2
-        # current_sequence = current_sequence[middle - 1000:middle + 1000]
+        middle = (all_end - all_start) // 2
+        # current_sequence = current_sequence[middle - 10000:middle + 10000]
         gr.mcols.get_column('sequence')[i] = current_sequence
 
     return gr
@@ -96,14 +110,13 @@ def create_aligned_fasta(alignment_file, output_file):
 
 
 def load_data(output_file):
-    data = open(output_file, 'r').read()
+    data_f = open(output_file, 'r').read()
     # subset to the first 10 lines
-    data = data.split('\n')[0:10]
+    data_f = data_f.split('\n')[0:10]
     # data = urlreq.urlopen(
     #     'https://git.io/alignment_viewer_p53.fasta'
     # ).read().decode('utf-8')
-    return data
-
+    return data_f
 
 @callback(
     Output('default-alignment-viewer-output', 'children'),
@@ -121,7 +134,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Utilities for long read sequencing data analysis')
     parser.add_argument('utility', type=str, help="Utility to use,options are: " + ', '.join(utility_list) + '.')
     parser.add_argument('alignment_file', type=str, help='Alignment file')
-    # ouput file
+    # output file
     parser.add_argument('output_file', type=str, help='Output file')
     args = parser.parse_args()
 
@@ -136,10 +149,14 @@ if __name__ == '__main__':
         dashbio.AlignmentChart(
             id='my-default-alignment-viewer',
             data=load_data(args.output_file),
-            height=900,
             colorscale='nucleotide',
             tilewidth=30,
         ),
         html.Div(id='default-alignment-viewer-output')
     ])
+
+    # data = load_data(args.output_file),
+    # colorscale = 'nucleotide',
+    # height = 3000,
+
     app.run(debug=True)
