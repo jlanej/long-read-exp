@@ -72,10 +72,10 @@ def harmonize_sequences(gr, gr_reduce):
         if start > all_start:
             current_sequence = '.' * num_Ns + current_sequence
 
-        indexToInsert =num_Ns
+        indexToInsert = num_Ns
         for c in cigars.items():
-        #     if the operation consumes the reference genome but not the read, add "." to the read sequence
-        #     to match the reference genome
+            #     if the operation consumes the reference genome but not the read, add "." to the read sequence
+            #     to match the reference genome
             if c[1] in ['D']:
                 current_sequence = current_sequence[:indexToInsert] + '.' * c[0] + current_sequence[indexToInsert:]
                 indexToInsert += c[0]
@@ -97,35 +97,20 @@ def harmonize_sequences(gr, gr_reduce):
     return gr
 
 
-def create_aligned_fasta(alignment_file, output_file):
+def create_harmonized_sequence(alignment_file):
     reads = extract_reads(alignment_file)
     gr, gr_reduce = convert_to_range(reads)
     gr = harmonize_sequences(gr, gr_reduce)
+    return gr
+
+
+def write_harmonized_fasta(gr, output_file):
     out = open(output_file, 'w')
     for i in range(len(gr)):
         out.write('>' + gr.get_seqnames()[0] + ':' + str(gr.get_start()[0]) + '-' + str(gr.get_end()[0]) + ':' +
                   str(gr.get_strand()[i]) + ':' + gr.mcols.get_column('read_name')[i] + '\n')
         out.write(gr.mcols.get_column('sequence')[i] + '\n')
     out.close()
-
-
-def load_data(output_file):
-    data_f = open(output_file, 'r').read()
-    # subset to the first 10 lines
-    data_f = data_f.split('\n')[0:10]
-    # data = urlreq.urlopen(
-    #     'https://git.io/alignment_viewer_p53.fasta'
-    # ).read().decode('utf-8')
-    return data_f
-
-@callback(
-    Output('default-alignment-viewer-output', 'children'),
-    Input('my-default-alignment-viewer', 'eventDatum')
-)
-def update_output(value):
-    if value is None:
-        return 'No data.'
-    return str(value)
 
 
 if __name__ == '__main__':
@@ -141,22 +126,6 @@ if __name__ == '__main__':
     if args.utility == utility_list[0]:
         # log the utility being used to stderr
         sys.stderr.write('Using utility: ' + args.utility + '\n')
-        create_aligned_fasta(args.alignment_file, args.output_file)
+        gr = create_harmonized_sequence(args.alignment_file)
+        write_harmonized_fasta(gr, args.output_file)
 
-    app = Dash(__name__)
-
-    app.layout = html.Div([
-        dashbio.AlignmentChart(
-            id='my-default-alignment-viewer',
-            data=load_data(args.output_file),
-            colorscale='nucleotide',
-            tilewidth=30,
-        ),
-        html.Div(id='default-alignment-viewer-output')
-    ])
-
-    # data = load_data(args.output_file),
-    # colorscale = 'nucleotide',
-    # height = 3000,
-
-    app.run(debug=True)
