@@ -52,9 +52,9 @@ def convert_to_range(reads):
 
 def get_non_clipped_cigar_length(cigar_string):
     #     Soft and Hard clipped bases are not included in the cigar string length
-    cigarS = cigar.Cigar(cigar_string)
+    cigar_s = cigar.Cigar(cigar_string)
     length = 0
-    for c in cigarS.items():
+    for c in cigar_s.items():
         if c[1] in ['M', 'I', 'X', '=']:
             length += c[0]
     return length
@@ -68,6 +68,9 @@ def define_best_haplotype(gr1, gr2):
     gr2_ids = set(gr2.mcols.get_column('read_name'))
     gr2.mcols.set_column('belongs_to_this_hap', [False] * len(gr2), in_place=True)
     common_ids = gr1_ids.intersection(gr2_ids)
+    # map of read id to the best haplotype
+    read_to_best_hap = {}
+
     if len(common_ids) == 0:
         sys.stderr.write('Error: No common read IDs between the two haplotypes\n')
         sys.exit(1)
@@ -78,13 +81,20 @@ def define_best_haplotype(gr1, gr2):
         cigar2_len = get_non_clipped_cigar_length(gr2.mcols.get_column('cigar')[gr2_index])
         if cigar1_len > cigar2_len:
             gr1.mcols.get_column('belongs_to_this_hap')[gr1_index] = True
+            read_to_best_hap[read_id] = 1
         elif cigar1_len < cigar2_len:
             gr2.mcols.get_column('belongs_to_this_hap')[gr2_index] = True
+            read_to_best_hap[read_id] = 2
         else:
             #     set both to true if the cigar lengths are the same
             gr1.mcols.get_column('belongs_to_this_hap')[gr1_index] = True
             gr2.mcols.get_column('belongs_to_this_hap')[gr2_index] = True
-    return gr1, gr2
+            read_to_best_hap[read_id] = 0
+    return gr1, gr2, read_to_best_hap
+
+
+def plot_alignment(start, width, ax, color, y):
+    ax.add_patch(plt.Rectangle((start, y - 0.4), width, 0.8, color=color))
 
 
 # plot alignments as rectangles on a plot, one rectangle per read,
@@ -92,9 +102,6 @@ def define_best_haplotype(gr1, gr2):
 
 def plot_haplotypes(gr1, gr2, gr_reduce1, gr_reduce2, gr_original, gr_reduce_original):
     fig, ax = plt.subplots(4)
-    countForHap1 = 0
-    countForHap2 = 0
-
     original_index = 0
     all_hap_index = 1
     best_hap_index = 2
@@ -102,48 +109,37 @@ def plot_haplotypes(gr1, gr2, gr_reduce1, gr_reduce2, gr_original, gr_reduce_ori
 
     for i in range(len(gr1)):
         if gr1.mcols.get_column('belongs_to_this_hap')[i]:
-            countForHap1 += 1
-            ax[best_hap_index].add_patch(
-                plt.Rectangle((gr1.get_start()[i], i - 0.4), gr1.get_width()[i], 0.8, color='blue'))
+            plot_alignment(gr1.get_start()[i], gr1.get_width()[i], ax[best_hap_index], 'blue', i)
         else:
-            ax[opposite_hap_index].add_patch(
-                plt.Rectangle((gr1.get_start()[i], i - 0.4), gr1.get_width()[i], 0.8, color='blue'))
-        ax[all_hap_index].add_patch(plt.Rectangle((gr1.get_start()[i], i - 0.4), gr1.get_width()[i], 0.8, color='blue'))
+            plot_alignment(gr1.get_start()[i], gr1.get_width()[i], ax[opposite_hap_index], 'blue', i)
+        plot_alignment(gr1.get_start()[i], gr1.get_width()[i], ax[all_hap_index], 'blue', i)
     for i in range(len(gr2)):
         if gr2.mcols.get_column('belongs_to_this_hap')[i]:
-            countForHap2 += 1
-            ax[best_hap_index].add_patch(
-                plt.Rectangle((gr2.get_start()[i], -1 * i + 0.4), gr2.get_width()[i], 0.8, color='red'))
+            plot_alignment(gr2.get_start()[i], gr2.get_width()[i], ax[best_hap_index], 'red', -1 * i)
         else:
-            ax[opposite_hap_index].add_patch(
-                plt.Rectangle((gr2.get_start()[i], -1 * i + 0.4), gr2.get_width()[i], 0.8, color='red'))
-        ax[all_hap_index].add_patch(
-            plt.Rectangle((gr2.get_start()[i], -1 * i + 0.4), gr2.get_width()[i], 0.8, color='red'))
-    ax[best_hap_index].set_xlim(min(gr_reduce1.get_start()[0], gr_reduce2.get_start()[0]),
-                                max(gr_reduce1.get_end()[0], gr_reduce2.get_end()[0]))
-    ax[best_hap_index].set_ylim(-len(gr2), len(gr1))
-    ax[all_hap_index].set_xlim(min(gr_reduce1.get_start()[0], gr_reduce2.get_start()[0]),
-                               max(gr_reduce1.get_end()[0], gr_reduce2.get_end()[0]))
-    ax[all_hap_index].set_ylim(-len(gr2), len(gr1))
-    ax[opposite_hap_index].set_xlim(min(gr_reduce1.get_start()[0], gr_reduce2.get_start()[0]),
-                                    max(gr_reduce1.get_end()[0], gr_reduce2.get_end()[0]))
-    ax[opposite_hap_index].set_ylim(-len(gr2), len(gr1))
+            plot_alignment(gr2.get_start()[i], gr2.get_width()[i], ax[opposite_hap_index], 'red', -1 * i)
+        plot_alignment(gr2.get_start()[i], gr2.get_width()[i], ax[all_hap_index], 'red', -1 * i)
+    set_axis(ax, gr1, gr2, gr_reduce1, gr_reduce2, best_hap_index)
+    set_axis(ax, gr1, gr2, gr_reduce1, gr_reduce2, all_hap_index)
+    set_axis(ax, gr1, gr2, gr_reduce1, gr_reduce2, opposite_hap_index)
 
-
-    print(countForHap1, " total reads in haplotype 1")
-    print(countForHap2, " total reads in haplotype 2")
     for i in range(len(gr_original)):
-        ax[original_index].add_patch(
-            plt.Rectangle((gr_original.get_start()[i], i - 0.4), gr_original.get_width()[i], 0.8, color='green'))
+        plot_alignment(gr_original.get_start()[i], gr_original.get_width()[i], ax[original_index], 'green', i)
     ax[original_index].set_xlim(gr_reduce_original.get_start()[0], gr_reduce_original.get_end()[0])
     ax[original_index].set_ylim(0, len(gr_original))
     plt.show()
 
 
+def set_axis(ax, gr1, gr2, gr_reduce1, gr_reduce2, opposite_hap_index):
+    ax[opposite_hap_index].set_xlim(min(gr_reduce1.get_start()[0], gr_reduce2.get_start()[0]),
+                                    max(gr_reduce1.get_end()[0], gr_reduce2.get_end()[0]))
+    ax[opposite_hap_index].set_ylim(-len(gr2), len(gr1))
+
+
 def parse_haplotype(haplotype_file):
     reads = extract_reads(haplotype_file)
     gr, gr_reduce = convert_to_range(reads)
-    return gr, gr_reduce
+    return gr, gr_reduce, reads
 
 
 if __name__ == '__main__':
@@ -160,8 +156,8 @@ if __name__ == '__main__':
     if args.utility == utility_list[0]:
         # log the utility being used to stderr
         sys.stderr.write('Using utility: ' + args.utility + '\n')
-        gr1, gr_reduce1 = parse_haplotype(args.haplotype1)
-        gr2, gr_reduce2 = parse_haplotype(args.haplotype2)
-        gr1, gr2 = define_best_haplotype(gr1, gr2)
-        gr_original, gr_reduce_original = parse_haplotype(args.original_alignment)
+        gr1, gr_reduce1, reads1 = parse_haplotype(args.haplotype1)
+        gr2, gr_reduce2, reads2 = parse_haplotype(args.haplotype2)
+        gr1, gr2, read_to_best_hap = define_best_haplotype(gr1, gr2)
+        gr_original, gr_reduce_original, reads_original = parse_haplotype(args.original_alignment)
         plot_haplotypes(gr1, gr2, gr_reduce1, gr_reduce2, gr_original, gr_reduce_original)
