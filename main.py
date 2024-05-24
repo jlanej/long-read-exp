@@ -10,6 +10,7 @@ import matplotlib.pyplot as plt
 
 utility_list = ['create_aligned_fasta']
 
+
 # https://github.com/moshi4/pyGenomeViz
 
 # extract all the reads from the alignment file to a list
@@ -38,6 +39,10 @@ def create_pandas_df(reads):
     return pd.DataFrame(d)
 
 
+def get_chr_start_stop(gr_row):
+    return gr_row['seqnames'], gr_row['starts'], gr_row['ends']
+
+
 # checks that the reads represent a continous region of the reference genome
 def convert_to_range(reads):
     grr = GenomicRanges.from_pandas(create_pandas_df(reads))
@@ -62,15 +67,58 @@ def get_non_clipped_cigar_span(cigar_string):
     return length
 
 
+# find the indices of the first and last non-clipped bases in the read
+def get_cigar_span_of_read(cigar_string):
+    cigar_s = cigar.Cigar(cigar_string)
+    start = 0
+    end = 0
+    for c in cigar_s.items():
+        if c[1] in ['M', 'I', 'X', '=']:
+            end += c[0]
+        else:
+            start += c[0]
+    return start, end
 
-def extract_all_alignments_per_read(gr):
-    alignments_map = {}
+
+def add_cigar_span(gr):
+    cigar_span = []
+    for i in range(len(gr)):
+        cigar_span.append(get_non_clipped_cigar_span(gr.mcols.get_column('cigar')[i]))
+    gr.mcols.set_column('cigar_span', cigar_span, in_place=True)
+    return gr
+
+
+def consolidate_cigar_spans_to_read_id(gr):
+    #     get the cigar spans for each read
+    gr = add_cigar_span(gr)
+    #     get the cigar spans for each read
+    read_name_to_cigar_span = {}
+    read_name_ref_span = {}
     for i in range(gr):
         read_name = gr.mcols.get_column('read_name')[i]
-        if read_name not in alignments_map:
-            alignments_map[read_name] = []
-        alignments_map[read_name].append(gr[i])
-    return alignments_map
+        if read_name not in read_name_to_cigar_span:
+            read_name_to_cigar_span[read_name] = []
+        if read_name not in read_name_ref_span:
+            read_name_ref_span[read_name] = []
+        read_name_to_cigar_span[read_name].append(gr.mcols.get_column('cigar_span')[i])
+        read_name_ref_span[read_name].append(get_chr_start_stop(gr[i]))
+    return read_name_to_cigar_span, read_name_ref_span
+
+
+# transfer the span information from reads in gr1 to reads in gr2
+def transfer_span_info(gr1, gr2):
+    #     add new columns to gr2 to store the span information
+    gr2.mcols.add_column('cigar_span_transfer', [0] * len(gr2))
+    gr2.mcols.add_column('start_transfer', [0] * len(gr2))
+    gr2.mcols.add_column('end_transfer', [0] * len(gr2))
+    read_name_to_cigar_span1, read_name_ref_span1 = consolidate_cigar_spans_to_read_id(gr1)
+    for read_name in read_name_to_cigar_span1:  # transfer the span information to gr2
+        indices = [i for i, x in enumerate(gr2.mcols.get_column('read_name')) if x == read_name]
+        for i in indices:
+            gr2.mcols.get_column('cigar_span_transfer')[i] = read_name_to_cigar_span1[read_name]
+            gr2.mcols.get_column('start_transfer')[i] = read_name_ref_span1[read_name][0]
+            gr2.mcols.get_column('end_transfer')[i] = read_name_ref_span1[read_name][1]
+    return gr2
 
 
 # for each read ID shared between the two haplotypes, choose the haplotype with longest alignment
@@ -110,7 +158,6 @@ def plot_alignment(start, width, ax, color, y):
     ax.add_patch(plt.Rectangle((start, y - 0.4), width, 0.8, color=color))
 
 
-
 # plot alignments as rectangles on a plot, one rectangle per read,
 # with the read name on the y-axis and the rectangle spanning the start and end of the read
 
@@ -143,7 +190,7 @@ def plot_haplotypes(gr1, gr2, gr_reduce1, gr_reduce2, gr_original, gr_reduce_ori
     ax[original_index].set_ylim(0, len(gr_original))
     # plt.savefig('haplotype_alignment.png')
     print("saving to", output_root + '_haplotype_alignment.png')
-    plt.savefig(output_root + '_haplotype_alignment.png',dpi=300,bbox_inches='tight')
+    plt.savefig(output_root + '_haplotype_alignment.png', dpi=300, bbox_inches='tight')
 
 
 def set_axis(ax, gr1, gr2, gr_reduce1, gr_reduce2, opposite_hap_index):
