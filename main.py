@@ -40,7 +40,7 @@ def create_pandas_df(reads):
 
 
 def get_chr_start_stop(gr_row):
-    return gr_row['seqnames'], gr_row['starts'], gr_row['ends']
+    return gr_row.get_seqnames()[0], gr_row.get_start()[0], gr_row.get_end()[0]
 
 
 # checks that the reads represent a continous region of the reference genome
@@ -94,7 +94,7 @@ def consolidate_cigar_spans_to_read_id(gr):
     #     get the cigar spans for each read
     read_name_to_cigar_span = {}
     read_name_ref_span = {}
-    for i in range(gr):
+    for i in range(len(gr)):
         read_name = gr.mcols.get_column('read_name')[i]
         if read_name not in read_name_to_cigar_span:
             read_name_to_cigar_span[read_name] = []
@@ -108,16 +108,28 @@ def consolidate_cigar_spans_to_read_id(gr):
 # transfer the span information from reads in gr1 to reads in gr2
 def transfer_span_info(gr1, gr2):
     #     add new columns to gr2 to store the span information
-    gr2.mcols.add_column('cigar_span_transfer', [0] * len(gr2))
-    gr2.mcols.add_column('start_transfer', [0] * len(gr2))
-    gr2.mcols.add_column('end_transfer', [0] * len(gr2))
+    gr2.mcols.set_column('cigar_span_transfer', [0] * len(gr2), in_place=True)
+    gr2.mcols.set_column('start_transfer', [0] * len(gr2), in_place=True)
+    gr2.mcols.set_column('end_transfer', [0] * len(gr2),    in_place=True)
     read_name_to_cigar_span1, read_name_ref_span1 = consolidate_cigar_spans_to_read_id(gr1)
     for read_name in read_name_to_cigar_span1:  # transfer the span information to gr2
         indices = [i for i, x in enumerate(gr2.mcols.get_column('read_name')) if x == read_name]
+        # print(len(indices))
+        print(indices)
+        # indices = gr2.mcols.get_column('read_name').index(read_name)
+        # print(indices)
+        # print(len(indices))
         for i in indices:
+            print(gr2.mcols.get_column('start_transfer'))
+            print(len(gr2.mcols.get_column('start_transfer')))
+            print(gr2.mcols.get_column('start_transfer')[i])
+            print( read_name_ref_span1[read_name])
+            # print the type of read_name_ref_span1[read_name]
+            print(type(read_name_ref_span1[read_name]))
+            print(len(read_name_ref_span1[read_name]))
             gr2.mcols.get_column('cigar_span_transfer')[i] = read_name_to_cigar_span1[read_name]
-            gr2.mcols.get_column('start_transfer')[i] = read_name_ref_span1[read_name][0]
-            gr2.mcols.get_column('end_transfer')[i] = read_name_ref_span1[read_name][1]
+            gr2.mcols.get_column('start_transfer')[i] = read_name_ref_span1[read_name][0][1]
+            gr2.mcols.get_column('end_transfer')[i] = read_name_ref_span1[read_name][0][2]
     return gr2
 
 
@@ -253,6 +265,8 @@ if __name__ == '__main__':
         gr_original, gr_reduce_original, reads_original = parse_haplotype(args.original_alignment)
 
         root_original = args.output_directory + os.path.basename(args.original_alignment)
+        transfer_span_info(gr_original, gr1)
+        transfer_span_info(gr_original, gr2)
         plot_haplotypes(gr1, gr2, gr_reduce1, gr_reduce2, gr_original, gr_reduce_original, root_original)
         #         output directory should be the same as the original alignment file
         #         output_directory = os.path.dirname(args.original_alignment)
