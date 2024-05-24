@@ -1,3 +1,4 @@
+import os
 import sys
 
 import cigar
@@ -9,6 +10,7 @@ import matplotlib.pyplot as plt
 
 utility_list = ['create_aligned_fasta']
 
+# https://github.com/moshi4/pyGenomeViz
 
 # extract all the reads from the alignment file to a list
 def extract_reads(alignment_file):
@@ -50,7 +52,7 @@ def convert_to_range(reads):
     return grr, reduce
 
 
-def get_non_clipped_cigar_length(cigar_string):
+def get_non_clipped_cigar_span(cigar_string):
     #     Soft and Hard clipped bases are not included in the cigar string length
     cigar_s = cigar.Cigar(cigar_string)
     length = 0
@@ -58,6 +60,17 @@ def get_non_clipped_cigar_length(cigar_string):
         if c[1] in ['M', 'I', 'X', '=']:
             length += c[0]
     return length
+
+
+
+def extract_all_alignments_per_read(gr):
+    alignments_map = {}
+    for i in range(gr):
+        read_name = gr.mcols.get_column('read_name')[i]
+        if read_name not in alignments_map:
+            alignments_map[read_name] = []
+        alignments_map[read_name].append(gr[i])
+    return alignments_map
 
 
 # for each read ID shared between the two haplotypes, choose the haplotype with longest alignment
@@ -77,8 +90,8 @@ def define_best_haplotype(gr1, gr2):
     for read_id in common_ids:
         gr1_index = gr1.mcols.get_column('read_name').index(read_id)
         gr2_index = gr2.mcols.get_column('read_name').index(read_id)
-        cigar1_len = get_non_clipped_cigar_length(gr1.mcols.get_column('cigar')[gr1_index])
-        cigar2_len = get_non_clipped_cigar_length(gr2.mcols.get_column('cigar')[gr2_index])
+        cigar1_len = get_non_clipped_cigar_span(gr1.mcols.get_column('cigar')[gr1_index])
+        cigar2_len = get_non_clipped_cigar_span(gr2.mcols.get_column('cigar')[gr2_index])
         if cigar1_len > cigar2_len:
             gr1.mcols.get_column('belongs_to_this_hap')[gr1_index] = True
             read_to_best_hap[read_id] = 1
@@ -97,10 +110,11 @@ def plot_alignment(start, width, ax, color, y):
     ax.add_patch(plt.Rectangle((start, y - 0.4), width, 0.8, color=color))
 
 
+
 # plot alignments as rectangles on a plot, one rectangle per read,
 # with the read name on the y-axis and the rectangle spanning the start and end of the read
 
-def plot_haplotypes(gr1, gr2, gr_reduce1, gr_reduce2, gr_original, gr_reduce_original):
+def plot_haplotypes(gr1, gr2, gr_reduce1, gr_reduce2, gr_original, gr_reduce_original, output_root):
     fig, ax = plt.subplots(4)
     original_index = 0
     all_hap_index = 1
@@ -127,7 +141,9 @@ def plot_haplotypes(gr1, gr2, gr_reduce1, gr_reduce2, gr_original, gr_reduce_ori
         plot_alignment(gr_original.get_start()[i], gr_original.get_width()[i], ax[original_index], 'green', i)
     ax[original_index].set_xlim(gr_reduce_original.get_start()[0], gr_reduce_original.get_end()[0])
     ax[original_index].set_ylim(0, len(gr_original))
-    plt.show()
+    # plt.savefig('haplotype_alignment.png')
+    print("saving to", output_root + '_haplotype_alignment.png')
+    plt.savefig(output_root + '_haplotype_alignment.png',dpi=300,bbox_inches='tight')
 
 
 def set_axis(ax, gr1, gr2, gr_reduce1, gr_reduce2, opposite_hap_index):
@@ -142,6 +158,33 @@ def parse_haplotype(haplotype_file):
     return gr, gr_reduce, reads
 
 
+def write_reads_to_best_haplotype(reads, read_to_best_hap, output_root, header, write_both_haplotypes=False):
+    h1_out_bam = output_root + '_hap1.bam'
+    h2_out_bam = output_root + '_hap2.bam'
+    h1_out = pysam.AlignmentFile(h1_out_bam, "wb", header=header)
+    h2_out = pysam.AlignmentFile(h2_out_bam, "wb", header=header)
+    for read in reads:
+        if read.query_name in read_to_best_hap:
+            if read_to_best_hap[read.query_name] == 1:
+                h1_out.write(read)
+            elif read_to_best_hap[read.query_name] == 2:
+                h2_out.write(read)
+            elif read_to_best_hap[read.query_name] == 0 and write_both_haplotypes:
+                h1_out.write(read)
+                h2_out.write(read)
+    # close the output bam files
+    h1_out.close()
+    h2_out.close()
+    # index the output bam files
+    pysam.index(h1_out_bam)
+    pysam.index(h2_out_bam)
+
+
+def get_header_from_bam(bam_file):
+    bam = pysam.AlignmentFile(bam_file, "rb")
+    return bam.header
+
+
 if __name__ == '__main__':
     # command line parser for the script. Current utilities are:
     # 1. create_aligned_fasta: create a fasta file from the aligned reads
@@ -150,7 +193,8 @@ if __name__ == '__main__':
     parser.add_argument('haplotype1', type=str, help='Alignment file for haplotype 1')
     parser.add_argument('haplotype2', type=str, help='Alignment file for haplotype 2')
     parser.add_argument('original_alignment', type=str, help='Alignment file for original reads')
-
+    # output directory argument
+    parser.add_argument('output_directory', type=str, help='Directory to write output files to')
     args = parser.parse_args()
 
     if args.utility == utility_list[0]:
@@ -160,4 +204,23 @@ if __name__ == '__main__':
         gr2, gr_reduce2, reads2 = parse_haplotype(args.haplotype2)
         gr1, gr2, read_to_best_hap = define_best_haplotype(gr1, gr2)
         gr_original, gr_reduce_original, reads_original = parse_haplotype(args.original_alignment)
-        plot_haplotypes(gr1, gr2, gr_reduce1, gr_reduce2, gr_original, gr_reduce_original)
+
+        root_original = args.output_directory + os.path.basename(args.original_alignment)
+        plot_haplotypes(gr1, gr2, gr_reduce1, gr_reduce2, gr_original, gr_reduce_original, root_original)
+        #         output directory should be the same as the original alignment file
+        #         output_directory = os.path.dirname(args.original_alignment)
+
+        # root Should be the basename of the alignment file
+        print("writing to root_original", root_original)
+        write_reads_to_best_haplotype(reads_original, read_to_best_hap, root_original,
+                                      get_header_from_bam(args.original_alignment))
+
+        root_haplotype1 = args.output_directory + os.path.basename(args.haplotype1)
+        print("writing to root_haplotype1", root_haplotype1)
+        write_reads_to_best_haplotype(reads1, read_to_best_hap, root_haplotype1,
+                                      get_header_from_bam(args.haplotype1))
+        root_haplotype2 = args.output_directory + os.path.basename(args.haplotype2)
+        print("writing to root_haplotype2", root_haplotype2)
+        write_reads_to_best_haplotype(reads2, read_to_best_hap, root_haplotype2,
+                                      get_header_from_bam(args.haplotype2))
+        # plot_haplotypes_plotly(gr1, gr2, gr_reduce1, gr_reduce2, gr_original, gr_reduce_original, root_original)
