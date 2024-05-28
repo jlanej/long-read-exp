@@ -106,31 +106,44 @@ def consolidate_cigar_spans_to_read_id(gr):
 
 
 # transfer the span information from reads in gr1 to reads in gr2
-def transfer_span_info(gr1, gr2):
-    #     add new columns to gr2 to store the span information
-    gr2.mcols.set_column('cigar_span_transfer', [0] * len(gr2), in_place=True)
-    gr2.mcols.set_column('start_transfer', [0] * len(gr2), in_place=True)
-    gr2.mcols.set_column('end_transfer', [0] * len(gr2),    in_place=True)
-    read_name_to_cigar_span1, read_name_ref_span1 = consolidate_cigar_spans_to_read_id(gr1)
+def transfer_span_info(gr_source, gr_target):
+    # #     add new columns to gr2 to store the span information
+    # gr2.mcols.set_column('cigar_span_transfer', [0] * len(gr2), in_place=True)
+    # gr2.mcols.set_column('start_transfer', [0] * len(gr2), in_place=True)
+    # gr2.mcols.set_column('end_transfer', [0] * len(gr2),    in_place=True)
+
+    # initiale the above columns to lists
+    gr_target.mcols.set_column('cigar_span_transfer', [[]] * len(gr_target), in_place=True)
+    gr_target.mcols.set_column('start_transfer', [[]] * len(gr_target), in_place=True)
+    gr_target.mcols.set_column('end_transfer', [[]] * len(gr_target), in_place=True)
+
+    read_name_to_cigar_span1, read_name_ref_span1 = consolidate_cigar_spans_to_read_id(gr_source)
     for read_name in read_name_to_cigar_span1:  # transfer the span information to gr2
-        indices = [i for i, x in enumerate(gr2.mcols.get_column('read_name')) if x == read_name]
+        indices = [i for i, x in enumerate(gr_target.mcols.get_column('read_name')) if x == read_name]
         # print(len(indices))
-        print(indices)
+        # print(indices)
         # indices = gr2.mcols.get_column('read_name').index(read_name)
         # print(indices)
         # print(len(indices))
         for i in indices:
-            print(gr2.mcols.get_column('start_transfer'))
-            print(len(gr2.mcols.get_column('start_transfer')))
-            print(gr2.mcols.get_column('start_transfer')[i])
-            print( read_name_ref_span1[read_name])
-            # print the type of read_name_ref_span1[read_name]
-            print(type(read_name_ref_span1[read_name]))
-            print(len(read_name_ref_span1[read_name]))
-            gr2.mcols.get_column('cigar_span_transfer')[i] = read_name_to_cigar_span1[read_name]
-            gr2.mcols.get_column('start_transfer')[i] = read_name_ref_span1[read_name][0][1]
-            gr2.mcols.get_column('end_transfer')[i] = read_name_ref_span1[read_name][0][2]
-    return gr2
+            # print(gr2.mcols.get_column('start_transfer'))
+            # print(len(gr2.mcols.get_column('start_transfer')))
+            # print(gr2.mcols.get_column('start_transfer')[i])
+            # print( read_name_ref_span1[read_name])
+            # # print the type of read_name_ref_span1[read_name]
+            # print(type(read_name_ref_span1[read_name]))
+            # print(len(read_name_ref_span1[read_name]))
+
+            # append all the values in read_name_ref_span1[read_name]
+            for ref_span in read_name_ref_span1[read_name]:
+                gr_target.mcols.get_column('cigar_span_transfer')[i].append(read_name_to_cigar_span1[read_name])
+                gr_target.mcols.get_column('start_transfer')[i].append(ref_span[1])
+                gr_target.mcols.get_column('end_transfer')[i].append(ref_span[2])
+
+            # gr2.mcols.get_column('cigar_span_transfer')[i] = read_name_to_cigar_span1[read_name]
+            # gr2.mcols.get_column('start_transfer')[i] = read_name_ref_span1[read_name][0][1]
+            # gr2.mcols.get_column('end_transfer')[i] = read_name_ref_span1[read_name][0][2]
+    return gr_target
 
 
 # for each read ID shared between the two haplotypes, choose the haplotype with longest alignment
