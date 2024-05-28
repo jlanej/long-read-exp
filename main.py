@@ -83,7 +83,7 @@ def get_cigar_span_of_read(cigar_string):
 def add_cigar_span(gr):
     cigar_span = []
     for i in range(len(gr)):
-        cigar_span.append(get_non_clipped_cigar_span(gr.mcols.get_column('cigar')[i]))
+        cigar_span.append(get_cigar_span_of_read(gr.mcols.get_column('cigar')[i]))
     gr.mcols.set_column('cigar_span', cigar_span, in_place=True)
     return gr
 
@@ -103,47 +103,6 @@ def consolidate_cigar_spans_to_read_id(gr):
         read_name_to_cigar_span[read_name].append(gr.mcols.get_column('cigar_span')[i])
         read_name_ref_span[read_name].append(get_chr_start_stop(gr[i]))
     return read_name_to_cigar_span, read_name_ref_span
-
-
-# transfer the span information from reads in gr1 to reads in gr2
-def transfer_span_info(gr_source, gr_target):
-    # #     add new columns to gr2 to store the span information
-    # gr2.mcols.set_column('cigar_span_transfer', [0] * len(gr2), in_place=True)
-    # gr2.mcols.set_column('start_transfer', [0] * len(gr2), in_place=True)
-    # gr2.mcols.set_column('end_transfer', [0] * len(gr2),    in_place=True)
-
-    # initiale the above columns to lists
-    gr_target.mcols.set_column('cigar_span_transfer', [[]] * len(gr_target), in_place=True)
-    gr_target.mcols.set_column('start_transfer', [[]] * len(gr_target), in_place=True)
-    gr_target.mcols.set_column('end_transfer', [[]] * len(gr_target), in_place=True)
-
-    read_name_to_cigar_span1, read_name_ref_span1 = consolidate_cigar_spans_to_read_id(gr_source)
-    for read_name in read_name_to_cigar_span1:  # transfer the span information to gr2
-        indices = [i for i, x in enumerate(gr_target.mcols.get_column('read_name')) if x == read_name]
-        # print(len(indices))
-        # print(indices)
-        # indices = gr2.mcols.get_column('read_name').index(read_name)
-        # print(indices)
-        # print(len(indices))
-        for i in indices:
-            # print(gr2.mcols.get_column('start_transfer'))
-            # print(len(gr2.mcols.get_column('start_transfer')))
-            # print(gr2.mcols.get_column('start_transfer')[i])
-            # print( read_name_ref_span1[read_name])
-            # # print the type of read_name_ref_span1[read_name]
-            # print(type(read_name_ref_span1[read_name]))
-            # print(len(read_name_ref_span1[read_name]))
-
-            # append all the values in read_name_ref_span1[read_name]
-            for ref_span in read_name_ref_span1[read_name]:
-                gr_target.mcols.get_column('cigar_span_transfer')[i].append(read_name_to_cigar_span1[read_name])
-                gr_target.mcols.get_column('start_transfer')[i].append(ref_span[1])
-                gr_target.mcols.get_column('end_transfer')[i].append(ref_span[2])
-
-            # gr2.mcols.get_column('cigar_span_transfer')[i] = read_name_to_cigar_span1[read_name]
-            # gr2.mcols.get_column('start_transfer')[i] = read_name_ref_span1[read_name][0][1]
-            # gr2.mcols.get_column('end_transfer')[i] = read_name_ref_span1[read_name][0][2]
-    return gr_target
 
 
 # for each read ID shared between the two haplotypes, choose the haplotype with longest alignment
@@ -182,6 +141,21 @@ def define_best_haplotype(gr1, gr2):
 def plot_alignment(start, width, ax, color, y):
     ax.add_patch(plt.Rectangle((start, y - 0.4), width, 0.8, color=color))
 
+def get_n_colors(n):
+    return plt.cm.viridis.colors[:n]
+
+# plots each portion of the reads's alignment span as a different colred rectangle
+def plot_alignment_span(gr_row, ax, y,read_name_to_cigar_span, read_name_ref_span):
+    # print(gr_row)
+    read_name=gr_row.mcols.get_column('read_name')[0]
+    spans=read_name_to_cigar_span[read_name]
+    colors = get_n_colors(len(spans))
+    for i in range(len(spans)):
+        start, end = spans[i]
+        ax.add_patch(plt.Rectangle((start, y - 0.4), end - start, 0.8, color=colors[i]))
+    return ax
+
+
 
 # plot alignments as rectangles on a plot, one rectangle per read,
 # with the read name on the y-axis and the rectangle spanning the start and end of the read
@@ -192,10 +166,12 @@ def plot_haplotypes(gr1, gr2, gr_reduce1, gr_reduce2, gr_original, gr_reduce_ori
     all_hap_index = 1
     best_hap_index = 2
     opposite_hap_index = 3
+    read_name_to_cigar_span, read_name_ref_span = consolidate_cigar_spans_to_read_id(gr_original)
 
     for i in range(len(gr1)):
         if gr1.mcols.get_column('belongs_to_this_hap')[i]:
-            plot_alignment(gr1.get_start()[i], gr1.get_width()[i], ax[best_hap_index], 'blue', i)
+            # plot_alignment(gr1.get_start()[i], gr1.get_width()[i], ax[best_hap_index], 'blue', i)
+            ax[best_hap_index]=plot_alignment_span(gr1[i], ax[best_hap_index], i, read_name_to_cigar_span, read_name_ref_span)
         else:
             plot_alignment(gr1.get_start()[i], gr1.get_width()[i], ax[opposite_hap_index], 'blue', i)
         plot_alignment(gr1.get_start()[i], gr1.get_width()[i], ax[all_hap_index], 'blue', i)
@@ -278,8 +254,8 @@ if __name__ == '__main__':
         gr_original, gr_reduce_original, reads_original = parse_haplotype(args.original_alignment)
 
         root_original = args.output_directory + os.path.basename(args.original_alignment)
-        transfer_span_info(gr_original, gr1)
-        transfer_span_info(gr_original, gr2)
+        # gr2=transfer_span_info(gr_original, gr2)
+        # gr1=transfer_span_info(gr_original, gr1)
         plot_haplotypes(gr1, gr2, gr_reduce1, gr_reduce2, gr_original, gr_reduce_original, root_original)
         #         output directory should be the same as the original alignment file
         #         output_directory = os.path.dirname(args.original_alignment)

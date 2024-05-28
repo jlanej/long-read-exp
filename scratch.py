@@ -85,3 +85,43 @@ def plot_harmonized_sequence(gr):
     ax.set_xlim(0, 1)
     ax.set_ylim(0, len(gr))
     plt.show()
+
+
+
+
+# # transfer the span information from reads in gr1 to reads in gr2
+# def transfer_span_info(gr_source, gr_target):
+#     gr_target.mcols.set_column('cigar_span_transfer', [[]] * len(gr_target), in_place=True)
+#     gr_target.mcols.set_column('start_transfer', pd.Series([] * len(gr_target)), in_place=True)
+#     gr_target.mcols.set_column('end_transfer', [[]] * len(gr_target), in_place=True)
+#     # print(gr_target.mcols.get_column('start_transfer'))
+#     gr_target.mcols.get_column('start_transfer')[0].append(1)
+#     # print(type(gr_target.mcols.get_column('start_transfer')))
+#     print(gr_target.mcols.get_column('start_transfer')[0])
+#     print(gr_target.mcols.get_column('start_transfer')[1])
+#     # print(gr_target.mcols.get_column('start_transfer'))
+#     read_name_to_cigar_span1, read_name_ref_span1 = consolidate_cigar_spans_to_read_id(gr_source)
+#     for read_name in read_name_to_cigar_span1:  # transfer the span information to gr2
+#         indices = [i for i, x in enumerate(gr_target.mcols.get_column('read_name')) if x == read_name]
+#         # print(indices)
+#         # exit
+#         for i in indices:
+#             # print(i)
+#             gr_target.mcols.get_column('cigar_span_transfer')[i].append(read_name_to_cigar_span1[read_name])
+#             # append all the values in read_name_ref_span1[read_name]
+#             for ref_span in read_name_ref_span1[read_name]:
+#
+#                 gr_target.mcols.get_column('start_transfer')[i].append(ref_span[1])
+#                 gr_target.mcols.get_column('end_transfer')[i].append(ref_span[2])
+#                 # print(gr_target.mcols.get_column('start_transfer')[i])
+#                 # print(gr_target.mcols.get_column('end_transfer')[i])
+#                 # # print(gr_target.mcols.get_column('cigar_span_transfer')[i])
+#     # print(gr_target.mcols.get_column('end_transfer')[0])
+#     # print(gr_target.mcols.get_column('end_transfer')[1])
+#     # print(gr_target.mcols.get_column('cigar_span_transfer')[0])
+#     # print(gr_target.mcols.get_column('cigar_span_transfer')[1])
+#
+#     sys.exit(1)
+#     # exit
+#
+#     return gr_target
