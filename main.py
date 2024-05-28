@@ -141,24 +141,24 @@ def define_best_haplotype(gr1, gr2):
 def plot_alignment(start, width, ax, color, y):
     ax.add_patch(plt.Rectangle((start, y - 0.4), width, 0.8, color=color))
 
+
 def get_n_colors(n):
     return plt.cm.viridis.colors[:n]
 
+
 # plots each portion of the reads's alignment span as a different colred rectangle
-def plot_alignment_span(gr_row, ax, y,read_name_to_cigar_span, read_name_ref_span):
+def plot_alignment_span(gr_row, ax, y, read_name_to_cigar_span, read_name_ref_span):
     # print(gr_row)
-    read_name=gr_row.mcols.get_column('read_name')[0]
-    spans=read_name_to_cigar_span[read_name]
+    read_name = gr_row.mcols.get_column('read_name')[0]
+    spans = read_name_to_cigar_span[read_name]
     colors = get_n_colors(len(spans))
     for i in range(len(spans)):
         start, end = spans[i]
+        start = start + gr_row.get_start()[0]
+        end = end + gr_row.get_start()[0]
+
         ax.add_patch(plt.Rectangle((start, y - 0.4), end - start, 0.8, color=colors[i]))
-    return ax
 
-
-
-# plot alignments as rectangles on a plot, one rectangle per read,
-# with the read name on the y-axis and the rectangle spanning the start and end of the read
 
 def plot_haplotypes(gr1, gr2, gr_reduce1, gr_reduce2, gr_original, gr_reduce_original, output_root):
     fig, ax = plt.subplots(4)
@@ -171,7 +171,7 @@ def plot_haplotypes(gr1, gr2, gr_reduce1, gr_reduce2, gr_original, gr_reduce_ori
     for i in range(len(gr1)):
         if gr1.mcols.get_column('belongs_to_this_hap')[i]:
             # plot_alignment(gr1.get_start()[i], gr1.get_width()[i], ax[best_hap_index], 'blue', i)
-            ax[best_hap_index]=plot_alignment_span(gr1[i], ax[best_hap_index], i, read_name_to_cigar_span, read_name_ref_span)
+            plot_alignment_span(gr1[i], ax[best_hap_index], i, read_name_to_cigar_span, read_name_ref_span)
         else:
             plot_alignment(gr1.get_start()[i], gr1.get_width()[i], ax[opposite_hap_index], 'blue', i)
         plot_alignment(gr1.get_start()[i], gr1.get_width()[i], ax[all_hap_index], 'blue', i)
