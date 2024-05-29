@@ -4,9 +4,12 @@ import sys
 import cigar
 import pysam
 import argparse
-import pandas as pd
-from genomicranges import GenomicRanges
 import matplotlib.pyplot as plt
+
+import utils.hap_cluster as hap_cluster
+import utils.lr_utils as lr_utils
+
+
 
 utility_list = ['create_aligned_fasta']
 
@@ -14,48 +17,6 @@ utility_list = ['create_aligned_fasta']
 # https://github.com/moshi4/pyGenomeViz
 
 # extract all the reads from the alignment file to a list
-def extract_reads(alignment_file):
-    a = pysam.AlignmentFile(alignment_file, "rb")
-    reads = []
-    for read in a:
-        reads.append(read)
-    return reads
-
-
-def create_pandas_df(reads):
-    d = []
-    for read in reads:
-        seq_name = read.reference_name
-        # if the sequence name is a non-standard chromosome, add chr0 to the sequence name There appears to be a bug
-        # in the reduce function that causes it to fail when the sequence name is not a standard chromosome
-        if not seq_name.startswith('chr'):
-            # replace "_" with "." in the sequence name
-            seq_name = seq_name.replace("_", ".")
-            seq_name = seq_name + '_0'
-        d.append({'seqnames': seq_name, 'strand': read.is_reverse, 'cigar': read.cigarstring,
-                  'read_name': read.query_name, 'starts': read.reference_start, 'ends': read.reference_end,
-                  'sequence': read.query_sequence})
-
-    return pd.DataFrame(d)
-
-
-def get_chr_start_stop(gr_row):
-    return gr_row.get_seqnames()[0], gr_row.get_start()[0], gr_row.get_end()[0]
-
-
-# checks that the reads represent a continous region of the reference genome
-def convert_to_range(reads):
-    grr = GenomicRanges.from_pandas(create_pandas_df(reads))
-    if len(set(grr.get_seqnames())) > 1:
-        sys.stderr.write('Error: Reads are not from the same chromosome\n')
-        sys.exit(1)
-    sys.stderr.write('Reads are from the same chromosome\n')
-    reduce = grr.reduce(ignore_strand=True)
-    if len(reduce) > 1:
-        sys.stderr.write('Error: Reads span  discontinuous range\n')
-        sys.exit(1)
-    return grr, reduce
-
 
 def get_cigar_length_for_ops(cigar_string):
     subtract_ops = ['D', 'I', 'X', 'S', 'H']
@@ -74,52 +35,9 @@ def get_cigar_length_for_ops(cigar_string):
     return length
 
 
-# find the indices of the first and last non-clipped bases in the read
-def get_cigar_span_of_read(cigar_s):
-    start = 0
-    end = 0
-    finding_start = True
-    for c in cigar_s.items():
-        if c[1] in ['M', 'I', 'X', '=']:
-            finding_start = False
-            end += c[0]
-        elif c[1] in ['S', 'H'] and finding_start:
-            start += c[0]
-    return start, end + start
-
 
 def reverse_span(span, length):
     return abs(span[0] - length), abs(span[1] - length)
-
-
-def add_cigar_span(gr):
-    cigar_span = []
-    for i in range(len(gr)):
-        cigar_ops = cigar.Cigar(gr.mcols.get_column('cigar')[i])
-        span = get_cigar_span_of_read(cigar_ops)
-        print(gr.get_strand()[i])
-        # if gr.get_strand()[i] == 1:
-        #    span = reverse_span(span, gr.get_width()[i])
-        cigar_span.append(span)
-    gr.mcols.set_column('cigar_span', cigar_span, in_place=True)
-    return gr
-
-
-def consolidate_cigar_spans_to_read_id(gr):
-    #     get the cigar spans for each read
-    gr = add_cigar_span(gr)
-    #     get the cigar spans for each read
-    read_name_to_cigar_span = {}
-    read_name_ref_span = {}
-    for i in range(len(gr)):
-        read_name = gr.mcols.get_column('read_name')[i]
-        if read_name not in read_name_to_cigar_span:
-            read_name_to_cigar_span[read_name] = []
-        if read_name not in read_name_ref_span:
-            read_name_ref_span[read_name] = []
-        read_name_to_cigar_span[read_name].append(gr.mcols.get_column('cigar_span')[i])
-        read_name_ref_span[read_name].append(get_chr_start_stop(gr[i]))
-    return read_name_to_cigar_span, read_name_ref_span
 
 
 # for each read ID shared between the two haplotypes, choose the haplotype with longest alignment
@@ -130,6 +48,9 @@ def define_best_haplotype(gr1, gr2):
     gr2_ids = set(gr2.mcols.get_column('read_name'))
     gr2.mcols.set_column('belongs_to_this_hap', [False] * len(gr2), in_place=True)
     common_ids = gr1_ids.intersection(gr2_ids)
+    # warn about reads that are not in both haplotypes
+    lr_utils.warn_diff_read_ids(gr1_ids, gr2_ids)
+
     # map of read id to the best haplotype
     read_to_best_hap = {}
 
@@ -155,38 +76,31 @@ def define_best_haplotype(gr1, gr2):
     return gr1, gr2, read_to_best_hap
 
 
+
 def plot_alignment(start, width, ax, color, y):
     ax.add_patch(plt.Rectangle((start, y - 0.4), width, 0.8, color=color))
 
 
 def get_n_colors(n):
-    return plt.cm.viridis.colors[:n]
+    return plt.colormaps['viridis'].resampled(n).colors
 
 
 # plots each portion of the reads's alignment span as a different colred rectangle
 def plot_alignment_span(gr_row, ax, y, read_name_to_cigar_span, read_name_ref_span):
-    # print(gr_row)
     read_name = gr_row.mcols.get_column('read_name')[0]
     spans = read_name_to_cigar_span[read_name]
-    # sort the spans by the start position
-    # print(spans)
+
     spans = sorted(spans, key=lambda x: x[0])
     colors = get_n_colors(len(spans))
 
-    colors = ['red', 'blue', 'green', 'yellow', 'orange', 'purple', 'pink', 'brown', 'black', 'cyan', 'magenta']
     if len(spans) > 0:
         for i in range(len(spans)):
             start, end = spans[i]
             start = start + gr_row.get_start()[0]
             end = end + gr_row.get_start()[0]
-
-            # only plot positive strand reads
             if gr_row.get_strand()[0] == 1:
-
                 ax.add_patch(plt.Rectangle((start, y - 0.4), end - start, 0.4, color=colors[i], edgecolor='black'))
-                # print("skipping")
             else:
-
                 ax.add_patch(plt.Rectangle((start, y - 0.4), end - start, 0.4, color=colors[i], edgecolor='black'))
 
 
@@ -200,7 +114,7 @@ def plot_haplotypes(gr1, gr2, gr_reduce1, gr_reduce2, gr_original, gr_reduce_ori
     best_hap_index = 3
     opposite_hap_index = 2
 
-    read_name_to_cigar_span, read_name_ref_span = consolidate_cigar_spans_to_read_id(gr_original)
+    read_name_to_cigar_span, read_name_ref_span = lr_utils.consolidate_cigar_spans_to_read_id(gr_original)
 
     h1_plot_index = 0
     h2_plot_index = 0
@@ -247,8 +161,8 @@ def set_axis(ax, gr1, gr2, gr_reduce1, gr_reduce2, opposite_hap_index):
 
 
 def parse_haplotype(haplotype_file):
-    reads = extract_reads(haplotype_file)
-    gr, gr_reduce = convert_to_range(reads)
+    reads = lr_utils.extract_reads(haplotype_file)
+    gr, gr_reduce = lr_utils.convert_to_range(reads)
     return gr, gr_reduce, reads
 
 
@@ -282,6 +196,7 @@ def get_header_from_bam(bam_file):
 if __name__ == '__main__':
     # command line parser for the script. Current utilities are:
     # 1. create_aligned_fasta: create a fasta file from the aligned reads
+    hap_cluster.hello()
     parser = argparse.ArgumentParser(description='Utilities for long read sequencing data analysis')
     parser.add_argument('utility', type=str, help="Utility to use,options are: " + ', '.join(utility_list) + '.')
     parser.add_argument('haplotype1', type=str, help='Alignment file for haplotype 1')
@@ -300,13 +215,7 @@ if __name__ == '__main__':
         gr_original, gr_reduce_original, reads_original = parse_haplotype(args.original_alignment)
 
         root_original = args.output_directory + os.path.basename(args.original_alignment)
-        # gr2=transfer_span_info(gr_original, gr2)
-        # gr1=transfer_span_info(gr_original, gr1)
         plot_haplotypes(gr1, gr2, gr_reduce1, gr_reduce2, gr_original, gr_reduce_original, root_original)
-        #         output directory should be the same as the original alignment file
-        #         output_directory = os.path.dirname(args.original_alignment)
-
-        # root Should be the basename of the alignment file
         print("writing to root_original", root_original)
         write_reads_to_best_haplotype(reads_original, read_to_best_hap, root_original,
                                       get_header_from_bam(args.original_alignment))
@@ -319,4 +228,3 @@ if __name__ == '__main__':
         print("writing to root_haplotype2", root_haplotype2)
         write_reads_to_best_haplotype(reads2, read_to_best_hap, root_haplotype2,
                                       get_header_from_bam(args.haplotype2))
-        # plot_haplotypes_plotly(gr1, gr2, gr_reduce1, gr_reduce2, gr_original, gr_reduce_original, root_original)
