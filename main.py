@@ -9,14 +9,8 @@ import matplotlib.pyplot as plt
 import utils.hap_cluster as hap_cluster
 import utils.lr_utils as lr_utils
 
-
-
 utility_list = ['create_aligned_fasta']
 
-
-# https://github.com/moshi4/pyGenomeViz
-
-# extract all the reads from the alignment file to a list
 
 def get_cigar_length_for_ops(cigar_string):
     subtract_ops = ['D', 'I', 'X', 'S', 'H']
@@ -33,11 +27,6 @@ def get_cigar_length_for_ops(cigar_string):
             sys.stderr.write('Error: Unknown cigar operation\n' + c[1] + '\n')
             sys.exit(1)
     return length
-
-
-
-def reverse_span(span, length):
-    return abs(span[0] - length), abs(span[1] - length)
 
 
 # for each read ID shared between the two haplotypes, choose the haplotype with longest alignment
@@ -76,22 +65,22 @@ def define_best_haplotype(gr1, gr2):
     return gr1, gr2, read_to_best_hap
 
 
-
 def plot_alignment(start, width, ax, color, y):
-    ax.add_patch(plt.Rectangle((start, y - 0.4), width, 0.8, color=color))
+    ax.add_patch(plt.Rectangle((start, y - 0.4), width, 0.4, color=color))
 
 
-def get_n_colors(n):
+def get_n_viridis_colors(n):
     return plt.colormaps['viridis'].resampled(n).colors
 
 
 # plots each portion of the reads's alignment span as a different colred rectangle
-def plot_alignment_span(gr_row, ax, y, read_name_to_cigar_span, read_name_ref_span):
+def plot_alignment_span(gr_row, ax, y, read_name_to_cigar_span):
     read_name = gr_row.mcols.get_column('read_name')[0]
     spans = read_name_to_cigar_span[read_name]
-
+    print("prior to sorting", spans)
     spans = sorted(spans, key=lambda x: x[0])
-    colors = get_n_colors(len(spans))
+    print("after sorting", spans)
+    colors = get_n_viridis_colors(len(spans))
 
     if len(spans) > 0:
         for i in range(len(spans)):
@@ -99,58 +88,69 @@ def plot_alignment_span(gr_row, ax, y, read_name_to_cigar_span, read_name_ref_sp
             start = start + gr_row.get_start()[0]
             end = end + gr_row.get_start()[0]
             if gr_row.get_strand()[0] == 1:
-                ax.add_patch(plt.Rectangle((start, y - 0.4), end - start, 0.4, color=colors[i], edgecolor='black'))
+                plot_alignment(start, end - start, ax, colors[i], y)
             else:
-                ax.add_patch(plt.Rectangle((start, y - 0.4), end - start, 0.4, color=colors[i], edgecolor='black'))
+                plot_alignment(start, end - start, ax, colors[i], y)
 
 
-def plot_haplotypes(gr1, gr2, gr_reduce1, gr_reduce2, gr_original, gr_reduce_original, output_root):
-    fig, ax = plt.subplots(5)
-    test_index = 4
-    test_index_opp = 5
+def plot_reference_span(gr_row, ax, y, read_name_to_cigar_span, read_name_ref_span):
+    read_name = gr_row.mcols.get_column('read_name')[0]
+    spans = read_name_to_cigar_span[read_name]
+    ref_spans = read_name_ref_span[read_name]
+    colors = get_n_viridis_colors(len(spans))
 
+    ref_sort = [x for _, x in sorted(zip(spans, ref_spans), key=lambda pair: pair[0][0])]
+    spans = sorted(spans, key=lambda x: x[0])
+    if len(spans) > 1:
+        cigar_ops = cigar.Cigar(gr_row.mcols.get_column('cigar')[0])
+        span_current = lr_utils.get_cigar_span_of_read(cigar_ops)
+        span_index = spans.index(span_current)
+        chrom,start, end = ref_sort[span_index]
+        plot_alignment(start, end - start, ax, colors[span_index], y)
+
+
+def plot_haplotypes(gr1, gr2, gr_reduce1, gr_reduce2, gr_original, gr_reduce_original, output_root, read_to_best_hap):
+    fig, ax = plt.subplots(2)
+    test_index = 1
     original_index = 0
-    all_hap_index = 1
-    best_hap_index = 3
-    opposite_hap_index = 2
 
     read_name_to_cigar_span, read_name_ref_span = lr_utils.consolidate_cigar_spans_to_read_id(gr_original)
 
-    h1_plot_index = 0
-    h2_plot_index = 0
+    h1_plot_index = 1
+    h2_plot_index = 1
     for i in range(len(gr1)):
-        if gr1.mcols.get_column('belongs_to_this_hap')[i]:
-            plot_alignment(gr1.get_start()[i], gr1.get_width()[i], ax[best_hap_index], 'blue', h1_plot_index)
-            plot_alignment_span(gr1[i], ax[test_index], h1_plot_index, read_name_to_cigar_span, read_name_ref_span)
+        if read_to_best_hap[gr1.mcols.get_column('read_name')[i]] == 1:
+            plot_alignment_span(gr1[i], ax[test_index], h1_plot_index, read_name_to_cigar_span)
             h1_plot_index += 1
-        else:
-            plot_alignment(gr1.get_start()[i], gr1.get_width()[i], ax[opposite_hap_index], 'blue', i)
-            # plot_alignment_span(gr1[i], ax[test_index_opp], i, read_name_to_cigar_span, read_name_ref_span)
-        plot_alignment(gr1.get_start()[i], gr1.get_width()[i], ax[all_hap_index], 'blue', i)
     for i in range(len(gr2)):
-        if gr2.mcols.get_column('belongs_to_this_hap')[i]:
-            plot_alignment(gr2.get_start()[i], gr2.get_width()[i], ax[best_hap_index], 'red', -1 * h2_plot_index)
-            plot_alignment_span(gr2[i], ax[test_index], -1 * h2_plot_index, read_name_to_cigar_span, read_name_ref_span)
+        if read_to_best_hap[gr2.mcols.get_column('read_name')[i]] == 2:
+            plot_alignment_span(gr2[i], ax[test_index], -1 * h2_plot_index, read_name_to_cigar_span)
             h2_plot_index += 1
-        else:
-            plot_alignment(gr2.get_start()[i], gr2.get_width()[i], ax[opposite_hap_index], 'red', -1 * i)
-            # plot_alignment_span(gr2[i], ax[test_index_opp], -1 * i, read_name_to_cigar_span, read_name_ref_span)
-        plot_alignment(gr2.get_start()[i], gr2.get_width()[i], ax[all_hap_index], 'red', -1 * i)
-    set_axis(ax, gr1, gr2, gr_reduce1, gr_reduce2, best_hap_index)
-    set_axis(ax, gr1, gr2, gr_reduce1, gr_reduce2, all_hap_index)
-    set_axis(ax, gr1, gr2, gr_reduce1, gr_reduce2, opposite_hap_index)
-    set_axis(ax, gr1, gr2, gr_reduce1, gr_reduce2, test_index)
-    # set_axis(ax, gr1, gr2, gr_reduce1, gr_reduce2, test_index_opp)
-    ax[test_index].set_ylim(-1 * (5 + h2_plot_index), h1_plot_index + 5)
-    ax[best_hap_index].set_ylim(-1 * (h2_plot_index + 5), h1_plot_index + 5)
 
+    set_axis(ax, gr1, gr2, gr_reduce1, gr_reduce2, test_index)
+    ax[test_index].set_ylim(-1 * (5 + h2_plot_index), h1_plot_index + 5)
+
+    h1_original_index = 1
+    h2_original_index = 1
     for i in range(len(gr_original)):
-        plot_alignment(gr_original.get_start()[i], gr_original.get_width()[i], ax[original_index], 'green', i)
+        if read_to_best_hap[gr_original.mcols.get_column('read_name')[i]] == 1:
+            plot_reference_span(gr_original[i], ax[original_index], h1_original_index, read_name_to_cigar_span,
+                                read_name_ref_span)
+            h1_original_index += 1
+        elif read_to_best_hap[gr_original.mcols.get_column('read_name')[i]] == 2:
+            plot_reference_span(gr_original[i], ax[original_index], -1*h2_original_index, read_name_to_cigar_span,
+                                read_name_ref_span)
+            h2_original_index += 1
+
     ax[original_index].set_xlim(gr_reduce_original.get_start()[0], gr_reduce_original.get_end()[0])
-    ax[original_index].set_ylim(0, len(gr_original))
-    # plt.savefig('haplotype_alignment.png')
+    ax[original_index].set_ylim(-1 * (5 + h2_original_index), h1_original_index + 5)
+
+    # hide the y-axis ticks
+    ax[test_index].yaxis.set_visible(False)
+    ax[original_index].yaxis.set_visible(False)
+
     print("saving to", output_root + '_haplotype_alignment.png')
-    plt.gcf().set_size_inches(10, 15)
+    plt.gcf().set_size_inches(15, 10)
     plt.savefig(output_root + '_haplotype_alignment.png', dpi=300, bbox_inches='tight')
 
 
@@ -215,7 +215,8 @@ if __name__ == '__main__':
         gr_original, gr_reduce_original, reads_original = parse_haplotype(args.original_alignment)
 
         root_original = args.output_directory + os.path.basename(args.original_alignment)
-        plot_haplotypes(gr1, gr2, gr_reduce1, gr_reduce2, gr_original, gr_reduce_original, root_original)
+        plot_haplotypes(gr1, gr2, gr_reduce1, gr_reduce2, gr_original, gr_reduce_original, root_original,
+                        read_to_best_hap)
         print("writing to root_original", root_original)
         write_reads_to_best_haplotype(reads_original, read_to_best_hap, root_original,
                                       get_header_from_bam(args.original_alignment))

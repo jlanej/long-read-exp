@@ -5,6 +5,7 @@ import pysam
 from genomicranges import GenomicRanges
 import cigar
 
+
 def warn_diff_read_ids(gr1_ids, gr2_ids):
     if len(gr1_ids) != len(gr2_ids):
         sys.stderr.write('Warning: Reads are not the same between the two haplotypes\n')
@@ -13,6 +14,7 @@ def warn_diff_read_ids(gr1_ids, gr2_ids):
             sys.stderr.write('Read ID: ' + read_id + ' not in haplotype 2\n')
         for read_id in gr2_ids.difference(gr1_ids):
             sys.stderr.write('Read ID: ' + read_id + ' not in haplotype 1\n')
+
 
 def extract_reads(alignment_file):
     a = pysam.AlignmentFile(alignment_file, "rb")
@@ -56,6 +58,7 @@ def convert_to_range(reads):
         sys.exit(1)
     return grr, reduce
 
+
 def add_cigar_span(gr):
     cigar_span = []
     for i in range(len(gr)):
@@ -66,6 +69,7 @@ def add_cigar_span(gr):
         cigar_span.append(span)
     gr.mcols.set_column('cigar_span', cigar_span, in_place=True)
     return gr
+
 
 def consolidate_cigar_spans_to_read_id(gr):
     #     get the cigar spans for each read
@@ -84,7 +88,6 @@ def consolidate_cigar_spans_to_read_id(gr):
     return read_name_to_cigar_span, read_name_ref_span
 
 
-
 # find the indices of the first and last non-clipped bases in the read
 def get_cigar_span_of_read(cigar_s):
     start = 0
@@ -97,3 +100,28 @@ def get_cigar_span_of_read(cigar_s):
         elif c[1] in ['S', 'H'] and finding_start:
             start += c[0]
     return start, end + start
+
+
+def reverse_span(span, length):
+    return abs(span[0] - length), abs(span[1] - length)
+
+
+# Col	Type	Description
+# 1	string	Query sequence name
+# 2	int	Query sequence length
+# 3	int	Query start coordinate (0-based)
+# 4	int	Query end coordinate (0-based)
+# 5	char	‘+’ if query/target on the same strand; ‘-’ if opposite
+# 6	string	Target sequence name
+# 7	int	Target sequence length
+# 8	int	Target start coordinate on the original strand
+# 9	int	Target end coordinate on the original strand
+# 10	int	Number of matching bases in the mapping
+# 11	int	Number bases, including gaps, in the mapping
+# 12	int	Mapping quality (0-255 with 255 for missing)
+
+def load_paf_file(paf_file):
+    paf = pd.read_csv(paf_file, sep='\t', header=None)
+    paf.columns = ['query_name', 'query_length', 'query_start', 'query_end', 'strand', 'target_name',
+                   'target_length', 'target_start', 'target_end', 'num_matches', 'num_bases', 'mapping_quality']
+    return paf
