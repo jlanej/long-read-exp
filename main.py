@@ -57,33 +57,50 @@ def convert_to_range(reads):
     return grr, reduce
 
 
-def get_non_clipped_cigar_span(cigar_string):
+def get_cigar_length_for_ops(cigar_string):
+    subtract_ops = ['D', 'I', 'X', 'S', 'H']
+    ops = ['M', '=']
     #     Soft and Hard clipped bases are not included in the cigar string length
     cigar_s = cigar.Cigar(cigar_string)
     length = 0
     for c in cigar_s.items():
-        if c[1] in ['M', 'I', 'X', '=']:
+        if c[1] in ops:
             length += c[0]
+        elif c[1] in subtract_ops:
+            length -= c[0]
+        else:
+            sys.stderr.write('Error: Unknown cigar operation\n' + c[1] + '\n')
+            sys.exit(1)
     return length
 
 
 # find the indices of the first and last non-clipped bases in the read
-def get_cigar_span_of_read(cigar_string):
-    cigar_s = cigar.Cigar(cigar_string)
+def get_cigar_span_of_read(cigar_s):
     start = 0
     end = 0
+    finding_start = True
     for c in cigar_s.items():
         if c[1] in ['M', 'I', 'X', '=']:
+            finding_start = False
             end += c[0]
-        else:
+        elif c[1] in ['S', 'H'] and finding_start:
             start += c[0]
-    return start, end
+    return start, end + start
+
+
+def reverse_span(span, length):
+    return abs(span[0] - length), abs(span[1] - length)
 
 
 def add_cigar_span(gr):
     cigar_span = []
     for i in range(len(gr)):
-        cigar_span.append(get_cigar_span_of_read(gr.mcols.get_column('cigar')[i]))
+        cigar_ops = cigar.Cigar(gr.mcols.get_column('cigar')[i])
+        span = get_cigar_span_of_read(cigar_ops)
+        print(gr.get_strand()[i])
+        # if gr.get_strand()[i] == 1:
+        #    span = reverse_span(span, gr.get_width()[i])
+        cigar_span.append(span)
     gr.mcols.set_column('cigar_span', cigar_span, in_place=True)
     return gr
 
@@ -122,8 +139,8 @@ def define_best_haplotype(gr1, gr2):
     for read_id in common_ids:
         gr1_index = gr1.mcols.get_column('read_name').index(read_id)
         gr2_index = gr2.mcols.get_column('read_name').index(read_id)
-        cigar1_len = get_non_clipped_cigar_span(gr1.mcols.get_column('cigar')[gr1_index])
-        cigar2_len = get_non_clipped_cigar_span(gr2.mcols.get_column('cigar')[gr2_index])
+        cigar1_len = get_cigar_length_for_ops(gr1.mcols.get_column('cigar')[gr1_index])
+        cigar2_len = get_cigar_length_for_ops(gr2.mcols.get_column('cigar')[gr2_index])
         if cigar1_len > cigar2_len:
             gr1.mcols.get_column('belongs_to_this_hap')[gr1_index] = True
             read_to_best_hap[read_id] = 1
@@ -131,7 +148,7 @@ def define_best_haplotype(gr1, gr2):
             gr2.mcols.get_column('belongs_to_this_hap')[gr2_index] = True
             read_to_best_hap[read_id] = 2
         else:
-            #     set both to true if the cigar lengths are the same
+            # set both to true if the cigar lengths are the same
             gr1.mcols.get_column('belongs_to_this_hap')[gr1_index] = True
             gr2.mcols.get_column('belongs_to_this_hap')[gr2_index] = True
             read_to_best_hap[read_id] = 0
@@ -151,39 +168,67 @@ def plot_alignment_span(gr_row, ax, y, read_name_to_cigar_span, read_name_ref_sp
     # print(gr_row)
     read_name = gr_row.mcols.get_column('read_name')[0]
     spans = read_name_to_cigar_span[read_name]
+    # sort the spans by the start position
+    # print(spans)
+    spans = sorted(spans, key=lambda x: x[0])
     colors = get_n_colors(len(spans))
-    for i in range(len(spans)):
-        start, end = spans[i]
-        start = start + gr_row.get_start()[0]
-        end = end + gr_row.get_start()[0]
 
-        ax.add_patch(plt.Rectangle((start, y - 0.4), end - start, 0.8, color=colors[i]))
+    colors = ['red', 'blue', 'green', 'yellow', 'orange', 'purple', 'pink', 'brown', 'black', 'cyan', 'magenta']
+    if len(spans) > 0:
+        for i in range(len(spans)):
+            start, end = spans[i]
+            start = start + gr_row.get_start()[0]
+            end = end + gr_row.get_start()[0]
+
+            # only plot positive strand reads
+            if gr_row.get_strand()[0] == 1:
+
+                ax.add_patch(plt.Rectangle((start, y - 0.4), end - start, 0.4, color=colors[i], edgecolor='black'))
+                # print("skipping")
+            else:
+
+                ax.add_patch(plt.Rectangle((start, y - 0.4), end - start, 0.4, color=colors[i], edgecolor='black'))
 
 
 def plot_haplotypes(gr1, gr2, gr_reduce1, gr_reduce2, gr_original, gr_reduce_original, output_root):
-    fig, ax = plt.subplots(4)
+    fig, ax = plt.subplots(5)
+    test_index = 4
+    test_index_opp = 5
+
     original_index = 0
     all_hap_index = 1
-    best_hap_index = 2
-    opposite_hap_index = 3
+    best_hap_index = 3
+    opposite_hap_index = 2
+
     read_name_to_cigar_span, read_name_ref_span = consolidate_cigar_spans_to_read_id(gr_original)
 
+    h1_plot_index = 0
+    h2_plot_index = 0
     for i in range(len(gr1)):
         if gr1.mcols.get_column('belongs_to_this_hap')[i]:
-            # plot_alignment(gr1.get_start()[i], gr1.get_width()[i], ax[best_hap_index], 'blue', i)
-            plot_alignment_span(gr1[i], ax[best_hap_index], i, read_name_to_cigar_span, read_name_ref_span)
+            plot_alignment(gr1.get_start()[i], gr1.get_width()[i], ax[best_hap_index], 'blue', h1_plot_index)
+            plot_alignment_span(gr1[i], ax[test_index], h1_plot_index, read_name_to_cigar_span, read_name_ref_span)
+            h1_plot_index += 1
         else:
             plot_alignment(gr1.get_start()[i], gr1.get_width()[i], ax[opposite_hap_index], 'blue', i)
+            # plot_alignment_span(gr1[i], ax[test_index_opp], i, read_name_to_cigar_span, read_name_ref_span)
         plot_alignment(gr1.get_start()[i], gr1.get_width()[i], ax[all_hap_index], 'blue', i)
     for i in range(len(gr2)):
         if gr2.mcols.get_column('belongs_to_this_hap')[i]:
-            plot_alignment(gr2.get_start()[i], gr2.get_width()[i], ax[best_hap_index], 'red', -1 * i)
+            plot_alignment(gr2.get_start()[i], gr2.get_width()[i], ax[best_hap_index], 'red', -1 * h2_plot_index)
+            plot_alignment_span(gr2[i], ax[test_index], -1 * h2_plot_index, read_name_to_cigar_span, read_name_ref_span)
+            h2_plot_index += 1
         else:
             plot_alignment(gr2.get_start()[i], gr2.get_width()[i], ax[opposite_hap_index], 'red', -1 * i)
+            # plot_alignment_span(gr2[i], ax[test_index_opp], -1 * i, read_name_to_cigar_span, read_name_ref_span)
         plot_alignment(gr2.get_start()[i], gr2.get_width()[i], ax[all_hap_index], 'red', -1 * i)
     set_axis(ax, gr1, gr2, gr_reduce1, gr_reduce2, best_hap_index)
     set_axis(ax, gr1, gr2, gr_reduce1, gr_reduce2, all_hap_index)
     set_axis(ax, gr1, gr2, gr_reduce1, gr_reduce2, opposite_hap_index)
+    set_axis(ax, gr1, gr2, gr_reduce1, gr_reduce2, test_index)
+    # set_axis(ax, gr1, gr2, gr_reduce1, gr_reduce2, test_index_opp)
+    ax[test_index].set_ylim(-1 * (5 + h2_plot_index), h1_plot_index + 5)
+    ax[best_hap_index].set_ylim(-1 * (h2_plot_index + 5), h1_plot_index + 5)
 
     for i in range(len(gr_original)):
         plot_alignment(gr_original.get_start()[i], gr_original.get_width()[i], ax[original_index], 'green', i)
@@ -191,6 +236,7 @@ def plot_haplotypes(gr1, gr2, gr_reduce1, gr_reduce2, gr_original, gr_reduce_ori
     ax[original_index].set_ylim(0, len(gr_original))
     # plt.savefig('haplotype_alignment.png')
     print("saving to", output_root + '_haplotype_alignment.png')
+    plt.gcf().set_size_inches(10, 15)
     plt.savefig(output_root + '_haplotype_alignment.png', dpi=300, bbox_inches='tight')
 
 
