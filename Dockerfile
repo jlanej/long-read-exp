@@ -28,5 +28,6 @@ RUN pip3 install -r requirements.txt
 COPY . /app
 WORKDIR /app
 
+RUN python3.9 main.py -h
 # run the project
 CMD ["python3.9", "main.py"]
