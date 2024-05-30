@@ -7,7 +7,7 @@ RUN apt-get update && apt-get install -y \
     python3.9 \
     python3-pip
 
-RUN pip3 install --upgrade pip
+RUN pip3.9 install --upgrade pip
 #RUN pip3 install pysam
 # install the project dependencies in requirements.txt
 COPY requirements.txt /app/requirements.txt
@@ -18,4 +18,4 @@ COPY . /app
 WORKDIR /app
 
 # run the project
-CMD ["python3", "main.py"]
+CMD ["python3.9", "main.py"]
