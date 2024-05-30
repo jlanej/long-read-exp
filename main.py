@@ -220,4 +220,4 @@ if __name__ == '__main__':
         print("writing to root_haplotype2", root_haplotype2)
         write_reads_to_best_haplotype(reads2, read_to_best_hap, root_haplotype2,
                                       get_header_from_bam(args.haplotype2))
-        lr_utils.cluster_haplotypes(gr1, gr2)
+        lr_utils.cluster_haplotypes(gr1, gr2,read_to_best_hap)

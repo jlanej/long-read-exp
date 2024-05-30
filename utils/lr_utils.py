@@ -188,8 +188,12 @@ def get_read_length(gr):
     return read_name_to_seq_len
 
 
-def cluster_haplotypes(gr1, gr2):
+def cluster_haplotypes(gr1, gr2,read_to_best_hap):
     read_name_to_cigar_metrics = prep_hap_metrics(gr1, gr2)
+    read_to_best_hap = pd.DataFrame.from_dict(read_to_best_hap, orient='index')
+    read_to_best_hap.columns = ['best_hap']
+    read_name_to_cigar_metrics = read_name_to_cigar_metrics.merge(read_to_best_hap, left_index=True, right_index=True,
+                                                                    how='outer')
     print(read_name_to_cigar_metrics)
 
 #     https://stackoverflow.com/questions/74980890/create-hierarchical-clustering-heatmap-based-on-grouping
@@ -206,8 +210,8 @@ def prep_hap(gr, hap_num):
 
 
 def prep_hap_metrics(gr1, gr2):
-    read_name_to_cigar_span1=prep_hap(gr1)
-    read_name_to_cigar_span2=prep_hap(gr2)
+    read_name_to_cigar_span1=prep_hap(gr1,1)
+    read_name_to_cigar_span2=prep_hap(gr2,2)
     warn_diff_read_ids(set(read_name_to_cigar_span1.keys()), set(read_name_to_cigar_span2.keys()))
 
     # merge the two data frames on the read name
