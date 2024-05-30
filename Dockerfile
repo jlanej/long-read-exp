@@ -1,7 +1,9 @@
-FROM python:3.9-alpine
+from ubuntu:20.04
 # install dependencies for the project
 
-RUN apk update && apk upgrade && apk add --no-cache make gcc
+RUN apt-get update && apt-get install -y \
+    python3.9 \
+    python3-pip
 
 RUN pip3 install --upgrade pip
 #RUN pip3 install pysam
