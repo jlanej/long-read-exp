@@ -12,22 +12,6 @@ import utils.lr_utils as lr_utils
 utility_list = ['create_aligned_fasta']
 
 
-def get_cigar_length_for_ops(cigar_string):
-    subtract_ops = ['D', 'I', 'X', 'S', 'H']
-    ops = ['M', '=']
-    #     Soft and Hard clipped bases are not included in the cigar string length
-    cigar_s = cigar.Cigar(cigar_string)
-    length = 0
-    for c in cigar_s.items():
-        if c[1] in ops:
-            length += c[0]
-        elif c[1] in subtract_ops:
-            length -= c[0]
-        else:
-            sys.stderr.write('Error: Unknown cigar operation\n' + c[1] + '\n')
-            sys.exit(1)
-    return length
-
 
 # for each read ID shared between the two haplotypes, choose the haplotype with longest alignment
 def define_best_haplotype(gr1, gr2):
@@ -49,8 +33,8 @@ def define_best_haplotype(gr1, gr2):
     for read_id in common_ids:
         gr1_index = gr1.mcols.get_column('read_name').index(read_id)
         gr2_index = gr2.mcols.get_column('read_name').index(read_id)
-        cigar1_len = get_cigar_length_for_ops(gr1.mcols.get_column('cigar')[gr1_index])
-        cigar2_len = get_cigar_length_for_ops(gr2.mcols.get_column('cigar')[gr2_index])
+        cigar1_len = lr_utils.get_cigar_length_metric(gr1.mcols.get_column('cigar')[gr1_index])
+        cigar2_len = lr_utils.get_cigar_length_metric(gr2.mcols.get_column('cigar')[gr2_index])
         if cigar1_len > cigar2_len:
             gr1.mcols.get_column('belongs_to_this_hap')[gr1_index] = True
             read_to_best_hap[read_id] = 1
@@ -209,6 +193,8 @@ if __name__ == '__main__':
     parser.add_argument('original_alignment', type=str, help='Alignment file for original reads')
     # output directory argument
     parser.add_argument('output_directory', type=str, help='Directory to write output files to')
+    # paf file argument
+    parser.add_argument('--paf', type=str, help='PAF file to read v read alignment information')
     args = parser.parse_args()
 
     if args.utility == utility_list[0]:
@@ -234,3 +220,4 @@ if __name__ == '__main__':
         print("writing to root_haplotype2", root_haplotype2)
         write_reads_to_best_haplotype(reads2, read_to_best_hap, root_haplotype2,
                                       get_header_from_bam(args.haplotype2))
+        lr_utils.cluster_haplotypes(gr1, gr2)

@@ -6,14 +6,18 @@ from genomicranges import GenomicRanges
 import cigar
 
 
-def warn_diff_read_ids(gr1_ids, gr2_ids):
+def warn_diff_read_ids(gr1_ids, gr2_ids, exit_on_diff=True):
     if len(gr1_ids) != len(gr2_ids):
         sys.stderr.write('Warning: Reads are not the same between the two haplotypes\n')
         #     list the read IDs that are not in both haplotypes
         for read_id in gr1_ids.difference(gr2_ids):
             sys.stderr.write('Read ID: ' + read_id + ' not in haplotype 2\n')
+            if exit_on_diff:
+                sys.exit(1)
         for read_id in gr2_ids.difference(gr1_ids):
             sys.stderr.write('Read ID: ' + read_id + ' not in haplotype 1\n')
+            if exit_on_diff:
+                sys.exit(1)
 
 
 def extract_reads(alignment_file):
@@ -125,3 +129,120 @@ def load_paf_file(paf_file):
     paf.columns = ['query_name', 'query_length', 'query_start', 'query_end', 'strand', 'target_name',
                    'target_length', 'target_start', 'target_end', 'num_matches', 'num_bases', 'mapping_quality']
     return paf
+
+
+def get_cigar_length_metric(cigar_string):
+    subtract_ops = ['D', 'I', 'X', 'S', 'H']
+    ops = ['M', '=']
+    cigar_s = cigar.Cigar(cigar_string)
+    length = 0
+    for c in cigar_s.items():
+        if c[1] in ops:
+            length += c[0]
+        elif c[1] in subtract_ops:
+            length -= c[0]
+        else:
+            sys.stderr.write('Error: Unknown cigar operation\n' + c[1] + '\n')
+            sys.exit(1)
+    return length
+
+
+def get_cigar_match_metric(cigar_string):
+    ops = ['M', '=']
+    cigar_s = cigar.Cigar(cigar_string)
+    length = 0
+    for c in cigar_s.items():
+        if c[1] in ops:
+            length += c[0]
+    return length
+
+
+def get_spans_per_read(gr):
+    read_name_to_length_metric = {}
+    read_name_to_match_metric = {}
+    for i in range(len(gr)):
+        read_id = gr.mcols.get_column('read_name')[i]
+        if read_id not in read_name_to_length_metric:
+            read_name_to_length_metric[read_id] = 0
+        if read_id not in read_name_to_match_metric:
+            read_name_to_match_metric[read_id] = 0
+        read_name_to_length_metric[read_id] += get_cigar_length_metric(gr.mcols.get_column('cigar')[i])
+        read_name_to_match_metric[read_id] += get_cigar_match_metric(gr.mcols.get_column('cigar')[i])
+    return read_name_to_length_metric, read_name_to_match_metric
+
+
+def get_full_read_length_from_cigar(cigar_string):
+    cigar_s = cigar.Cigar(cigar_string)
+    length = 0
+    for c in cigar_s.items():
+        if c[1] in ['M', 'I', 'X', '=', 'S', 'H']:
+            length += c[0]
+    return length
+
+
+def get_read_length(gr):
+    read_name_to_seq_len = {}
+    for i in range(len(gr)):
+        read_id = gr.mcols.get_column('read_name')[i]
+        read_name_to_seq_len[read_id] = get_full_read_length_from_cigar(gr.mcols.get_column('cigar')[i])
+    return read_name_to_seq_len
+
+
+def cluster_haplotypes(gr1, gr2):
+    read_name_to_cigar_metrics = prep_hap_metrics(gr1, gr2)
+    print(read_name_to_cigar_metrics)
+
+#     https://stackoverflow.com/questions/74980890/create-hierarchical-clustering-heatmap-based-on-grouping
+
+def prep_hap(gr, hap_num):
+    read_name_to_cigar_span, read_name_to_match_metric = get_spans_per_read(gr)
+    read_name_to_cigar_span = pd.DataFrame.from_dict(read_name_to_cigar_span, orient='index')
+    read_name_to_cigar_span.columns = ['hap' + str(hap_num)]
+    read_name_to_match_metric = pd.DataFrame.from_dict(read_name_to_match_metric, orient='index')
+    read_name_to_match_metric.columns = ['hap' + str(hap_num) + '_match_metric']
+    read_name_to_cigar_span = read_name_to_cigar_span.merge(read_name_to_match_metric, left_index=True,
+                                                            right_index=True, how='outer')
+    return read_name_to_cigar_span
+
+
+def prep_hap_metrics(gr1, gr2):
+    read_name_to_cigar_span1, read_name_to_match_metric1 = get_spans_per_read(gr1)
+    read_name_to_cigar_span2, read_name_to_match_metric2 = get_spans_per_read(gr2)
+    warn_diff_read_ids(set(read_name_to_cigar_span1.keys()), set(read_name_to_cigar_span2.keys()))
+
+    # create a data frame for the read names and the cumulative cigar spans with a column per haplotype
+    read_name_to_cigar_span1 = pd.DataFrame.from_dict(read_name_to_cigar_span1, orient='index')
+    # name the column with the haplotype number
+    read_name_to_cigar_span1.columns = ['hap1']
+    read_name_to_match_metric1 = pd.DataFrame.from_dict(read_name_to_match_metric1, orient='index')
+    read_name_to_match_metric1.columns = ['hap1_match_metric']
+    read_name_to_cigar_span1 = read_name_to_cigar_span1.merge(read_name_to_match_metric1, left_index=True,
+                                                              right_index=True, how='outer')
+
+    read_name_to_cigar_span2 = pd.DataFrame.from_dict(read_name_to_cigar_span2, orient='index')
+    read_name_to_cigar_span2.columns = ['hap2']
+    read_name_to_match_metric2 = pd.DataFrame.from_dict(read_name_to_match_metric2, orient='index')
+    read_name_to_match_metric2.columns = ['hap2_match_metric']
+    read_name_to_cigar_span2 = read_name_to_cigar_span2.merge(read_name_to_match_metric2, left_index=True,
+                                                              right_index=True, how='outer')
+
+    # merge the two data frames on the read name
+    read_name_to_cigar_metrics = read_name_to_cigar_span1.merge(read_name_to_cigar_span2, left_index=True,
+                                                                right_index=True, how='outer')
+
+    read_name_seq_len1 = pd.DataFrame.from_dict(get_read_length(gr1), orient='index')
+    read_name_seq_len1.columns = ['read_length']
+    # merge the two data frames on the read name
+    read_name_to_cigar_metrics = read_name_to_cigar_metrics.merge(read_name_seq_len1, left_index=True, right_index=True,
+                                                                  how='outer')
+
+    props_for_proportion = ['hap1', 'hap2', 'hap1_match_metric', 'hap2_match_metric']
+    proportions = ['hap1_prop', 'hap2_prop', 'hap1_match_prop', 'hap2_match_prop']
+
+    for i in range(len(props_for_proportion)):
+        read_name_to_cigar_metrics[proportions[i]] = read_name_to_cigar_metrics[props_for_proportion[i]] / \
+                                                     read_name_to_cigar_metrics['read_length']
+        read_name_to_cigar_metrics[proportions[i]] = read_name_to_cigar_metrics[proportions[i]].clip(lower=0)
+
+
+    return read_name_to_cigar_metrics
