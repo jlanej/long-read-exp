@@ -206,36 +206,18 @@ def prep_hap(gr, hap_num):
 
 
 def prep_hap_metrics(gr1, gr2):
-    read_name_to_cigar_span1, read_name_to_match_metric1 = get_spans_per_read(gr1)
-    read_name_to_cigar_span2, read_name_to_match_metric2 = get_spans_per_read(gr2)
+    read_name_to_cigar_span1=prep_hap(gr1)
+    read_name_to_cigar_span2=prep_hap(gr2)
     warn_diff_read_ids(set(read_name_to_cigar_span1.keys()), set(read_name_to_cigar_span2.keys()))
-
-    # create a data frame for the read names and the cumulative cigar spans with a column per haplotype
-    read_name_to_cigar_span1 = pd.DataFrame.from_dict(read_name_to_cigar_span1, orient='index')
-    # name the column with the haplotype number
-    read_name_to_cigar_span1.columns = ['hap1']
-    read_name_to_match_metric1 = pd.DataFrame.from_dict(read_name_to_match_metric1, orient='index')
-    read_name_to_match_metric1.columns = ['hap1_match_metric']
-    read_name_to_cigar_span1 = read_name_to_cigar_span1.merge(read_name_to_match_metric1, left_index=True,
-                                                              right_index=True, how='outer')
-
-    read_name_to_cigar_span2 = pd.DataFrame.from_dict(read_name_to_cigar_span2, orient='index')
-    read_name_to_cigar_span2.columns = ['hap2']
-    read_name_to_match_metric2 = pd.DataFrame.from_dict(read_name_to_match_metric2, orient='index')
-    read_name_to_match_metric2.columns = ['hap2_match_metric']
-    read_name_to_cigar_span2 = read_name_to_cigar_span2.merge(read_name_to_match_metric2, left_index=True,
-                                                              right_index=True, how='outer')
 
     # merge the two data frames on the read name
     read_name_to_cigar_metrics = read_name_to_cigar_span1.merge(read_name_to_cigar_span2, left_index=True,
                                                                 right_index=True, how='outer')
-
     read_name_seq_len1 = pd.DataFrame.from_dict(get_read_length(gr1), orient='index')
     read_name_seq_len1.columns = ['read_length']
     # merge the two data frames on the read name
     read_name_to_cigar_metrics = read_name_to_cigar_metrics.merge(read_name_seq_len1, left_index=True, right_index=True,
                                                                   how='outer')
-
     props_for_proportion = ['hap1', 'hap2', 'hap1_match_metric', 'hap2_match_metric']
     proportions = ['hap1_prop', 'hap2_prop', 'hap1_match_prop', 'hap2_match_prop']
 
