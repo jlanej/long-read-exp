@@ -7,7 +7,6 @@ import pysam
 from genomicranges import GenomicRanges
 import cigar
 
-
 def warn_diff_read_ids(gr1_ids, gr2_ids, exit_on_diff=True):
     if len(gr1_ids) != len(gr2_ids):
         sys.stderr.write('Warning: Reads are not the same between the two haplotypes\n')
@@ -254,7 +253,7 @@ def cluster_haplotypes(gr1, gr2, read_to_best_hap, output_file):
 def plot_h_clust(legend_colors, legend_labels, read_name_to_cigar_metrics_to_plot, row_colors, title):
     cm = sns.clustermap(read_name_to_cigar_metrics_to_plot, metric="euclidean", cmap="viridis",
                         xticklabels=True, yticklabels=False,
-                        dendrogram_ratio=(0.25, 0.15),  # fraction of the figure dedicated to row and column dendrograms
+                        dendrogram_ratio=(0.35, 0.15),  # fraction of the figure dedicated to row and column dendrograms
                         row_colors=row_colors,
                         col_cluster=False,
                         cbar_pos=[.4, .9, .5, .03],  # x, y, width, height in "figure coordinates"
@@ -265,6 +264,5 @@ def plot_h_clust(legend_colors, legend_labels, read_name_to_cigar_metrics_to_plo
     cm.ax_row_dendrogram.legend(title='Row Colors', handles=legend_handles, loc='lower left', bbox_to_anchor=(0, 1.02))
     # add a title
     cm.fig.suptitle(title)
-    return cm
 
-#     https://stackoverflow.com/questions/74980890/create-hierarchical-clustering-heatmap-based-on-grouping
+    return cm

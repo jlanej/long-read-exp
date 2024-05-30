@@ -5,7 +5,6 @@ import cigar
 import pysam
 import argparse
 import matplotlib.pyplot as plt
-
 import utils.hap_cluster as hap_cluster
 import utils.lr_utils as lr_utils
 
