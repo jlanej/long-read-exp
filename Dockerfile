@@ -1,8 +1,8 @@
-from ubuntu:20.04
+FROM python:3.9-alpine
 # install dependencies for the project
 
 RUN apt-get update && apt-get install -y \
-    python3 \
+    python3.9 \
     python3-pip
 
 RUN pip3 install --upgrade pip
