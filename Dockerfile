@@ -1,7 +1,7 @@
 FROM python:3.9-alpine
 # install dependencies for the project
 
-RUN apk add --no-cache gcc musl-dev linux-headers
+RUN apk update && apk upgrade && apk add --no-cache make
 
 RUN pip3 install --upgrade pip
 #RUN pip3 install pysam
