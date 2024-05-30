@@ -3,9 +3,20 @@ from ubuntu:20.04
 ARG DEBIAN_FRONTEND=noninteractive
 ENV TZ=Etc/UTC
 
-RUN apt-get update && apt-get install -y \
-    python3.9 \
-    python3-pip
+RUN apt-get update
+#https://stackoverflow.com/a/73243594
+
+RUN set -ex && \
+    apt install -y \
+        software-properties-common && \
+    add-apt-repository -y ppa:deadsnakes/ppa && \
+    apt install -y \
+        python3.9 \
+        python3.9-distutils \
+        python3.9-venv && \
+    python3.9 --version && \
+    python3.9 -m ensurepip && \
+    pip3.9 --version
 
 RUN pip3.9 install --upgrade pip
 #RUN pip3 install pysam
