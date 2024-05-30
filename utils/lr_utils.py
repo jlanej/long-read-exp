@@ -1,6 +1,8 @@
 import sys
 
 import pandas as pd
+import seaborn as sns
+import matplotlib.pyplot as plt
 import pysam
 from genomicranges import GenomicRanges
 import cigar
@@ -188,16 +190,6 @@ def get_read_length(gr):
     return read_name_to_seq_len
 
 
-def cluster_haplotypes(gr1, gr2,read_to_best_hap):
-    read_name_to_cigar_metrics = prep_hap_metrics(gr1, gr2)
-    read_to_best_hap = pd.DataFrame.from_dict(read_to_best_hap, orient='index')
-    read_to_best_hap.columns = ['best_hap']
-    read_name_to_cigar_metrics = read_name_to_cigar_metrics.merge(read_to_best_hap, left_index=True, right_index=True,
-                                                                    how='outer')
-    print(read_name_to_cigar_metrics)
-
-#     https://stackoverflow.com/questions/74980890/create-hierarchical-clustering-heatmap-based-on-grouping
-
 def prep_hap(gr, hap_num):
     read_name_to_cigar_span, read_name_to_match_metric = get_spans_per_read(gr)
     read_name_to_cigar_span = pd.DataFrame.from_dict(read_name_to_cigar_span, orient='index')
@@ -210,8 +202,8 @@ def prep_hap(gr, hap_num):
 
 
 def prep_hap_metrics(gr1, gr2):
-    read_name_to_cigar_span1=prep_hap(gr1,1)
-    read_name_to_cigar_span2=prep_hap(gr2,2)
+    read_name_to_cigar_span1 = prep_hap(gr1, 1)
+    read_name_to_cigar_span2 = prep_hap(gr2, 2)
     warn_diff_read_ids(set(read_name_to_cigar_span1.keys()), set(read_name_to_cigar_span2.keys()))
 
     # merge the two data frames on the read name
@@ -230,5 +222,49 @@ def prep_hap_metrics(gr1, gr2):
                                                      read_name_to_cigar_metrics['read_length']
         read_name_to_cigar_metrics[proportions[i]] = read_name_to_cigar_metrics[proportions[i]].clip(lower=0)
 
-
     return read_name_to_cigar_metrics
+
+
+def cluster_haplotypes(gr1, gr2, read_to_best_hap, output_file):
+    print('Clustering haplotypes')
+
+    read_name_to_cigar_metrics = prep_hap_metrics(gr1, gr2)
+    read_to_best_hap = pd.DataFrame.from_dict(read_to_best_hap, orient='index')
+    read_to_best_hap.columns = ['best_hap']
+    read_name_to_cigar_metrics = read_name_to_cigar_metrics.merge(read_to_best_hap, left_index=True, right_index=True,
+                                                                  how='outer')
+
+    print(read_name_to_cigar_metrics)
+
+    legend_labels = ['Assigned to haplotype 1', 'Assigned to haplotype 2']
+    legend_colors = ['gold', 'crimson']
+
+    read_name_to_cigar_metrics_to_plot = read_name_to_cigar_metrics[['hap1_prop', 'hap2_prop']]
+
+    row_colors = [legend_colors[0] if best_hap == 1 else legend_colors[1] if best_hap == 2 else 'black' for best_hap in
+                  read_name_to_cigar_metrics['best_hap']]
+    cm = plot_h_clust(legend_colors, legend_labels, read_name_to_cigar_metrics_to_plot, row_colors,
+                      'Read haplotype match metrics')
+
+    print("saving figure to " + output_file)
+    plt.gcf().set_size_inches(10, 10)
+    plt.savefig(output_file, dpi=300, bbox_inches='tight')
+
+
+def plot_h_clust(legend_colors, legend_labels, read_name_to_cigar_metrics_to_plot, row_colors, title):
+    cm = sns.clustermap(read_name_to_cigar_metrics_to_plot, metric="euclidean", cmap="viridis",
+                        xticklabels=True, yticklabels=False,
+                        dendrogram_ratio=(0.25, 0.15),  # fraction of the figure dedicated to row and column dendrograms
+                        row_colors=row_colors,
+                        col_cluster=False,
+                        cbar_pos=[.4, .9, .5, .03],  # x, y, width, height in "figure coordinates"
+                        cbar_kws={'orientation': "horizontal"})
+    # create a legend, use the row dendogram for positioning
+    legend_handles = [plt.Rectangle((0, 0), 0, 0, color=color, label=label)
+                      for color, label in zip(legend_colors, legend_labels)]
+    cm.ax_row_dendrogram.legend(title='Row Colors', handles=legend_handles, loc='lower left', bbox_to_anchor=(0, 1.02))
+    # add a title
+    cm.fig.suptitle(title)
+    return cm
+
+#     https://stackoverflow.com/questions/74980890/create-hierarchical-clustering-heatmap-based-on-grouping

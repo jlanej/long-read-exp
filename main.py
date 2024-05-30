@@ -146,7 +146,7 @@ def set_axis(ax, ymin, ymax, xmin, xmax, h1_index, h2_index, title):
     ax.axhline(y=0, color='grey', linestyle='dotted', linewidth=4)
     ax.set_title(title)
     ax.set_yticks([-1 * h2_index / 2, h1_index / 2])
-    ax.set_yticklabels(['H1', 'H2'])
+    ax.set_yticklabels(['H2', 'H1'])
 
 
 def parse_haplotype(haplotype_file):
@@ -220,4 +220,4 @@ if __name__ == '__main__':
         print("writing to root_haplotype2", root_haplotype2)
         write_reads_to_best_haplotype(reads2, read_to_best_hap, root_haplotype2,
                                       get_header_from_bam(args.haplotype2))
-        lr_utils.cluster_haplotypes(gr1, gr2,read_to_best_hap)
+        lr_utils.cluster_haplotypes(gr1, gr2,read_to_best_hap,root_original+'_haplotype_cluster.png')
