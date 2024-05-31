@@ -113,7 +113,7 @@ def reverse_span(span, length):
 
 
 # IGV hides indels with length less than 2, and since these are common and noisy, we will ignore them for now as well
-def get_cigar_length_metric(cigar_string,min_indel_size):
+def get_cigar_length_metric(cigar_string, min_indel_size):
     subtract_ops = ['D', 'I', 'X', 'S', 'H']
     ops = ['M', '=']
     cigar_s = cigar.Cigar(cigar_string)
@@ -122,10 +122,8 @@ def get_cigar_length_metric(cigar_string,min_indel_size):
         if c[1] in ops:
             length += c[0]
         elif c[1] in subtract_ops:
-            if c[1] == 'I' and c[0] < min_indel_size:
-                continue
-            length -= c[0]
-
+            if (c[1] != 'I' and c[1] != 'D') or c[0] >= min_indel_size:
+                length -= c[0]
         else:
             sys.stderr.write('Error: Unknown cigar operation\n' + c[1] + '\n')
             sys.exit(1)
@@ -151,9 +149,12 @@ def get_spans_per_read(gr, min_indel_size):
             read_name_to_length_metric[read_id] = 0
         if read_id not in read_name_to_match_metric:
             read_name_to_match_metric[read_id] = 0
-        read_name_to_length_metric[read_id] += get_cigar_length_metric(gr.mcols.get_column('cigar')[i],min_indel_size)
-        read_name_to_match_metric[read_id] += get_cigar_match_metric(gr.mcols.get_column('cigar')[i],min_indel_size)
+        read_name_to_length_metric[read_id] += get_cigar_length_metric(gr.mcols.get_column('cigar')[i], min_indel_size)
+        read_name_to_match_metric[read_id] += get_cigar_match_metric(gr.mcols.get_column('cigar')[i])
+        if read_id == "m64043_200130_175216/9505075/ccs":
+            print(gr.mcols.get_column('cigar')[i])
     return read_name_to_length_metric, read_name_to_match_metric
+
 
 def get_read_length(gr):
     read_name_to_seq_len = {}
@@ -161,6 +162,8 @@ def get_read_length(gr):
         read_id = gr.mcols.get_column('read_name')[i]
         read_name_to_seq_len[read_id] = get_full_read_length_from_cigar(gr.mcols.get_column('cigar')[i])
     return read_name_to_seq_len
+
+
 def get_full_read_length_from_cigar(cigar_string):
     cigar_s = cigar.Cigar(cigar_string)
     length = 0
@@ -191,8 +194,8 @@ def load_paf_file(paf_file):
     return paf
 
 
-def prep_hap(gr, hap_num,min_indel_size):
-    read_name_to_cigar_span, read_name_to_match_metric = get_spans_per_read(gr,min_indel_size)
+def prep_hap(gr, hap_num, min_indel_size):
+    read_name_to_cigar_span, read_name_to_match_metric = get_spans_per_read(gr, min_indel_size)
     read_name_to_cigar_span = pd.DataFrame.from_dict(read_name_to_cigar_span, orient='index')
     read_name_to_cigar_span.columns = ['hap' + str(hap_num)]
     read_name_to_match_metric = pd.DataFrame.from_dict(read_name_to_match_metric, orient='index')
@@ -202,9 +205,9 @@ def prep_hap(gr, hap_num,min_indel_size):
     return read_name_to_cigar_span
 
 
-def prep_hap_metrics(gr1, gr2,min_indel_size):
-    read_name_to_cigar_span1 = prep_hap(gr1, 1,min_indel_size)
-    read_name_to_cigar_span2 = prep_hap(gr2, 2,min_indel_size)
+def prep_hap_metrics(gr1, gr2, min_indel_size):
+    read_name_to_cigar_span1 = prep_hap(gr1, 1, min_indel_size)
+    read_name_to_cigar_span2 = prep_hap(gr2, 2, min_indel_size)
     warn_diff_read_ids(set(read_name_to_cigar_span1.keys()), set(read_name_to_cigar_span2.keys()))
 
     # merge the two data frames on the read name
@@ -216,7 +219,6 @@ def prep_hap_metrics(gr1, gr2,min_indel_size):
     # merge the two data frames on the read name
     read_name_to_cigar_metrics = read_name_to_cigar_metrics.merge(read_name_seq_len1, left_index=True, right_index=True,
                                                                   how='outer')
-
 
     props_for_proportion = ['hap1', 'hap2', 'hap1_match_metric', 'hap2_match_metric']
     proportions = ['hap1_prop', 'hap2_prop', 'hap1_match_prop', 'hap2_match_prop']
