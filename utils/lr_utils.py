@@ -161,12 +161,25 @@ def get_full_read_length_from_cigar(cigar_string):
     return length
 
 
-def get_read_length(gr):
-    read_name_to_seq_len = {}
-    for i in range(len(gr)):
-        read_id = gr.mcols.get_column('read_name')[i]
-        read_name_to_seq_len[read_id] = get_full_read_length_from_cigar(gr.mcols.get_column('cigar')[i])
-    return read_name_to_seq_len
+# Col	Type	Description
+# 1	string	Query sequence name
+# 2	int	Query sequence length
+# 3	int	Query start coordinate (0-based)
+# 4	int	Query end coordinate (0-based)
+# 5	char	‘+’ if query/target on the same strand; ‘-’ if opposite
+# 6	string	Target sequence name
+# 7	int	Target sequence length
+# 8	int	Target start coordinate on the original strand
+# 9	int	Target end coordinate on the original strand
+# 10	int	Number of matching bases in the mapping
+# 11	int	Number bases, including gaps, in the mapping
+# 12	int	Mapping quality (0-255 with 255 for missing)
+
+def load_paf_file(paf_file):
+    paf = pd.read_csv(paf_file, sep='\t', header=None)
+    paf.columns = ['query_name', 'query_length', 'query_start', 'query_end', 'strand', 'target_name',
+                   'target_length', 'target_start', 'target_end', 'num_matches', 'num_bases', 'mapping_quality']
+    return paf
 
 
 def prep_hap(gr, hap_num):
@@ -188,11 +201,7 @@ def prep_hap_metrics(gr1, gr2):
     # merge the two data frames on the read name
     read_name_to_cigar_metrics = read_name_to_cigar_span1.merge(read_name_to_cigar_span2, left_index=True,
                                                                 right_index=True, how='outer')
-    read_name_seq_len1 = pd.DataFrame.from_dict(get_read_length(gr1), orient='index')
-    read_name_seq_len1.columns = ['read_length']
-    # merge the two data frames on the read name
-    read_name_to_cigar_metrics = read_name_to_cigar_metrics.merge(read_name_seq_len1, left_index=True, right_index=True,
-                                                                  how='outer')
+    read_name_to_cigar_metrics['read_length'] = [get_full_read_length_from_cigar(cigar_string) for cigar_string in gr1.mcols.get_column('cigar')]
     props_for_proportion = ['hap1', 'hap2', 'hap1_match_metric', 'hap2_match_metric']
     proportions = ['hap1_prop', 'hap2_prop', 'hap1_match_prop', 'hap2_match_prop']
 
