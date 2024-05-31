@@ -7,6 +7,7 @@ import pysam
 from genomicranges import GenomicRanges
 import cigar
 
+
 def warn_diff_read_ids(gr1_ids, gr2_ids, exit_on_diff=True):
     if len(gr1_ids) != len(gr2_ids):
         sys.stderr.write('Warning: Reads are not the same between the two haplotypes\n')
@@ -50,7 +51,7 @@ def get_chr_start_stop(gr_row):
     return gr_row.get_seqnames()[0], gr_row.get_start()[0], gr_row.get_end()[0]
 
 
-# checks that the reads represent a continous region of the reference genome
+# checks that the reads represent a continuous region of the reference genome
 def convert_to_range(reads):
     grr = GenomicRanges.from_pandas(create_pandas_df(reads))
     if len(set(grr.get_seqnames())) > 1:
@@ -109,27 +110,6 @@ def get_cigar_span_of_read(cigar_s):
 
 def reverse_span(span, length):
     return abs(span[0] - length), abs(span[1] - length)
-
-
-# Col	Type	Description
-# 1	string	Query sequence name
-# 2	int	Query sequence length
-# 3	int	Query start coordinate (0-based)
-# 4	int	Query end coordinate (0-based)
-# 5	char	‘+’ if query/target on the same strand; ‘-’ if opposite
-# 6	string	Target sequence name
-# 7	int	Target sequence length
-# 8	int	Target start coordinate on the original strand
-# 9	int	Target end coordinate on the original strand
-# 10	int	Number of matching bases in the mapping
-# 11	int	Number bases, including gaps, in the mapping
-# 12	int	Mapping quality (0-255 with 255 for missing)
-
-def load_paf_file(paf_file):
-    paf = pd.read_csv(paf_file, sep='\t', header=None)
-    paf.columns = ['query_name', 'query_length', 'query_start', 'query_end', 'strand', 'target_name',
-                   'target_length', 'target_start', 'target_end', 'num_matches', 'num_bases', 'mapping_quality']
-    return paf
 
 
 def get_cigar_length_metric(cigar_string):
@@ -221,17 +201,25 @@ def prep_hap_metrics(gr1, gr2):
                                                      read_name_to_cigar_metrics['read_length']
         read_name_to_cigar_metrics[proportions[i]] = read_name_to_cigar_metrics[proportions[i]].clip(lower=0)
 
+    read_name_to_cigar_metrics['best_hap'] = [get_best_hap_for_read(read_id, read_name_to_cigar_metrics) for read_id in
+                                              read_name_to_cigar_metrics.index]
     return read_name_to_cigar_metrics
 
 
-def cluster_haplotypes(gr1, gr2, read_to_best_hap, output_file):
-    print('Clustering haplotypes')
+def get_best_hap_for_read(read_id, read_name_to_cigar_metrics):
+    if read_id in read_name_to_cigar_metrics.index:
+        hap1_prop = read_name_to_cigar_metrics.loc[read_id, 'hap1_prop']
+        hap2_prop = read_name_to_cigar_metrics.loc[read_id, 'hap2_prop']
+        if hap1_prop > hap2_prop:
+            return 1
+        else:
+            return 2
+    else:
+        return 0
 
-    read_name_to_cigar_metrics = prep_hap_metrics(gr1, gr2)
-    read_to_best_hap = pd.DataFrame.from_dict(read_to_best_hap, orient='index')
-    read_to_best_hap.columns = ['best_hap']
-    read_name_to_cigar_metrics = read_name_to_cigar_metrics.merge(read_to_best_hap, left_index=True, right_index=True,
-                                                                  how='outer')
+
+def cluster_haplotypes(gr1, gr2, read_name_to_cigar_metrics, output_file):
+    print('Clustering haplotypes')
 
     print(read_name_to_cigar_metrics)
 
