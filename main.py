@@ -154,14 +154,17 @@ def write_reads_to_best_haplotype(reads, read_name_to_cigar_metrics, output_root
     # sys.exit(1)
     h1_out = pysam.AlignmentFile(h1_out_bam, "wb", header=header)
     h2_out = pysam.AlignmentFile(h2_out_bam, "wb", header=header)
-    h_combined_out_bam = pysam.AlignmentFile(h_combined_out_bam, "wb", header=header)
+    h_combined_out = pysam.AlignmentFile(h_combined_out_bam, "wb", header=header)
 
     for read in reads:
         read.set_tag('BH', lr_utils.get_best_hap_for_read(read.query_name, read_name_to_cigar_metrics))
         read.set_tag('C1', read_name_to_cigar_metrics.loc[read.query_name,"hap1_prop"], value_type='f')
         read.set_tag('C2', read_name_to_cigar_metrics.loc[read.query_name,"hap2_prop"], value_type='f')
+        read.set_tag('M1', read_name_to_cigar_metrics.loc[read.query_name, "hap1"], value_type='f')
+        read.set_tag('M2', read_name_to_cigar_metrics.loc[read.query_name, "hap2"], value_type='f')
+
         if read.query_name in read_name_to_cigar_metrics.index:
-            h_combined_out_bam.write(read)
+            h_combined_out.write(read)
             if lr_utils.get_best_hap_for_read(read.query_name, read_name_to_cigar_metrics) == 1:
                 h1_out.write(read)
             elif lr_utils.get_best_hap_for_read(read.query_name, read_name_to_cigar_metrics) == 2:
@@ -172,7 +175,7 @@ def write_reads_to_best_haplotype(reads, read_name_to_cigar_metrics, output_root
     # close the output bam files
     h1_out.close()
     h2_out.close()
-    h_combined_out_bam.close()
+    h_combined_out.close()
     # index the output bam files
     pysam.index(h1_out_bam)
     pysam.index(h2_out_bam)
@@ -202,6 +205,10 @@ if __name__ == '__main__':
     if args.utility == utility_list[0]:
         # log the utility being used to stderr
         sys.stderr.write('Using utility: ' + args.utility + '\n')
+
+        # indels smaller than this size will be ignored for the purposes of haplotype assignment
+        min_indel_size = 2
+
         gr1, gr_reduce1, reads1 = parse_haplotype(args.haplotype1)
         gr2, gr_reduce2, reads2 = parse_haplotype(args.haplotype2)
         read_name_to_cigar_metrics = lr_utils.prep_hap_metrics(gr1, gr2)
