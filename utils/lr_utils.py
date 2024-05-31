@@ -151,7 +151,12 @@ def get_spans_per_read(gr):
         read_name_to_match_metric[read_id] += get_cigar_match_metric(gr.mcols.get_column('cigar')[i])
     return read_name_to_length_metric, read_name_to_match_metric
 
-
+def get_read_length(gr):
+    read_name_to_seq_len = {}
+    for i in range(len(gr)):
+        read_id = gr.mcols.get_column('read_name')[i]
+        read_name_to_seq_len[read_id] = get_full_read_length_from_cigar(gr.mcols.get_column('cigar')[i])
+    return read_name_to_seq_len
 def get_full_read_length_from_cigar(cigar_string):
     cigar_s = cigar.Cigar(cigar_string)
     length = 0
@@ -201,7 +206,14 @@ def prep_hap_metrics(gr1, gr2):
     # merge the two data frames on the read name
     read_name_to_cigar_metrics = read_name_to_cigar_span1.merge(read_name_to_cigar_span2, left_index=True,
                                                                 right_index=True, how='outer')
-    read_name_to_cigar_metrics['read_length'] = [get_full_read_length_from_cigar(cigar_string) for cigar_string in gr1.mcols.get_column('cigar')]
+
+    read_name_seq_len1 = pd.DataFrame.from_dict(get_read_length(gr1), orient='index')
+    read_name_seq_len1.columns = ['read_length']
+    # merge the two data frames on the read name
+    read_name_to_cigar_metrics = read_name_to_cigar_metrics.merge(read_name_seq_len1, left_index=True, right_index=True,
+                                                                  how='outer')
+
+
     props_for_proportion = ['hap1', 'hap2', 'hap1_match_metric', 'hap2_match_metric']
     proportions = ['hap1_prop', 'hap2_prop', 'hap1_match_prop', 'hap2_match_prop']
 
