@@ -52,16 +52,19 @@ def get_chr_start_stop(gr_row):
 
 
 # checks that the reads represent a continuous region of the reference genome
-def convert_to_range(reads):
+def convert_to_range(reads,exit_on_error=True):
     grr = GenomicRanges.from_pandas(create_pandas_df(reads))
     if len(set(grr.get_seqnames())) > 1:
         sys.stderr.write('Error: Reads are not from the same chromosome\n')
-        sys.exit(1)
-    sys.stderr.write('Reads are from the same chromosome\n')
+        if exit_on_error:
+            sys.exit(1)
+    else:
+        sys.stderr.write('Reads are from the same chromosome\n')
     reduce = grr.reduce(ignore_strand=True)
     if len(reduce) > 1:
         sys.stderr.write('Error: Reads span  discontinuous range\n')
-        sys.exit(1)
+        if exit_on_error:
+            sys.exit(1)
     return grr, reduce
 
 
