@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 import pysam
 from genomicranges import GenomicRanges
 import cigar
+from collections import Counter
 
 
 def warn_diff_read_ids(gr1_ids, gr2_ids, exit_on_diff=True):
@@ -52,14 +53,19 @@ def get_chr_start_stop(gr_row):
 
 
 # checks that the reads represent a continuous region of the reference genome
-def convert_to_range(reads,exit_on_error=True):
+def convert_to_range(reads, keep_most_common_chr=True, exit_on_error=True):
     grr = GenomicRanges.from_pandas(create_pandas_df(reads))
     if len(set(grr.get_seqnames())) > 1:
         sys.stderr.write('Error: Reads are not from the same chromosome\n')
-        if exit_on_error:
+        if keep_most_common_chr:
+            chr_counts = Counter(grr.get_seqnames())
+            chr_counts = dict(chr_counts)
+            most_common_chr = max(chr_counts, key=chr_counts.get)
+            indices_to_keep = [i for i, x in enumerate(grr.get_seqnames()) if x == most_common_chr]
+            grr = grr.get_subset(indices_to_keep)
+            sys.stderr.write('Keeping reads from the most common chromosome: ' + most_common_chr + '\n')
+        elif exit_on_error:
             sys.exit(1)
-    else:
-        sys.stderr.write('Reads are from the same chromosome\n')
     reduce = grr.reduce(ignore_strand=True)
     if len(reduce) > 1:
         sys.stderr.write('Error: Reads span  discontinuous range\n')
@@ -154,8 +160,6 @@ def get_spans_per_read(gr, min_indel_size):
             read_name_to_match_metric[read_id] = 0
         read_name_to_length_metric[read_id] += get_cigar_length_metric(gr.mcols.get_column('cigar')[i], min_indel_size)
         read_name_to_match_metric[read_id] += get_cigar_match_metric(gr.mcols.get_column('cigar')[i])
-        if read_id == "m64043_200130_175216/9505075/ccs":
-            print(gr.mcols.get_column('cigar')[i])
     return read_name_to_length_metric, read_name_to_match_metric
 
 
