@@ -3,7 +3,8 @@ import os
 
 import numpy as np
 import matplotlib.pyplot as plt
-
+import pysam
+from multiprocessing.dummy import Pool as ThreadPool
 
 # adapted from https://medium.com/@anoopjohny2000/visualizing-sequence-similarity-with-dotplots-in-python-f5cf0ac8559f#:~:text=To%20create%20a%20Dot%20plot,with%20ungapped%20alignment%20and%20wordsize.
 def dotplot(seqA, seqB, w, s):
@@ -59,43 +60,49 @@ def dotplot2Graphics(dp, labelA, labelB, heading, filename):
 def main():
     # Define the command line arguments
     parser = argparse.ArgumentParser(description="Generate a dotplot from two sequences in FASTA format.")
-    parser.add_argument("w", type=int, help="the window size")
-    parser.add_argument("s", type=int, help="the stringency")
-    parser.add_argument("seqA", help="the filename of the first sequence in FASTA format")
-    parser.add_argument("seqB", help="the filename of the second sequence in FASTA format")
-    parser.add_argument("title", help="the title of the dotplot")
-    parser.add_argument("output", help="the output filename for the dotplot")
-    # argument for whether we should take the reverse complement of the first sequence
-    parser.add_argument("--reverse", action="store_true", help="take the reverse complement of the first sequence")
-
-    # Parse the command line arguments
+    parser.add_argument("--w", type=int, help="the window size")
+    parser.add_argument("--s", type=int, help="the stringency")
+    parser.add_argument("--bam", help="the bam file of sequences")
+    parser.add_argument("--reference_seq", help="the filename of the second sequence in FASTA format")
+    parser.add_argument("--output", help="the root output filename for the dotplot")
+    parser.add_argument("--threads", type=int, help="the number of threads to use", default=8)
     args = parser.parse_args()
+    a = pysam.AlignmentFile(args.bam, "rb")
+    threads = args.threads
+    print("using ", threads, " threads")
+    pool = ThreadPool(threads)
+    pool.map(lambda read: create_dot(read, args.reference_seq, args.w, args.s, args.output), a)
+    pool.close()
 
-    # Read the sequences from the input files
-    with open(args.seqA) as fileA, open(args.seqB) as fileB:
-        seqA = "".join([line.strip() for line in fileA if not line.startswith(">")])
-        seqB = "".join([line.strip() for line in fileB if not line.startswith(">")])
-    # make sure the sequences are upper case
-    seqA = seqA.upper()
-    seqB = seqB.upper()
+
+def create_dot(read, reference_seq_file, w, s, output):
+    sanitized_read_name = read.query_name.replace("/", "_")
+    output_read = output+ "." + sanitized_read_name
+    with open(reference_seq_file) as fileB:
+        reference_seq = "".join([line.strip() for line in fileB if not line.startswith(">")])
+    reference_seq = reference_seq.upper()
+
+    seqA = read.seq
+
+    print("read name: ", read.query_name)
+    print("output file roots: ", output_read)
     print("length of seqA: ", len(seqA))
-    print("length of seqB: ", len(seqB))
-
+    print("length of seqB: ", len(reference_seq))
     # Take the reverse complement of the first sequence if requested
-    if args.reverse:
+    if read.is_reverse:
         seqA = seqA[::-1].translate(str.maketrans("ACGT", "TGCA"))
-        print("T aking the reverse complement of the first sequence")
-    cache_file = args.output + ".window." + str(args.w) + ".stringency." + str(args.s) + ".npy"
-    # if the cache file does not exist ,gernerate the dp and save it
+        print("Taking the reverse complement of the first sequence")
 
+    cache_file = output_read + ".window." + str(w) + ".stringency." + str(s) + ".npy"
+    # if the cache file does not exist ,generate the dp and save it
     if not os.path.exists(cache_file):
-        dp = dotplot(seqA, seqB, args.w, args.s)
+        dp = dotplot(seqA, reference_seq, w, s)
         np.save(cache_file, dp)
     else:
         dp = np.load(cache_file)
-    # dp = dotplot(seqA, seqB, args.w, args.s)
-    # # Generate the graphical dotplot
-    dotplot2Graphics(dp, args.seqA, args.seqB, args.title, args.output + ".png")
+
+    dotplot2Graphics(dp, read.query_name, reference_seq_file, read.query_name,
+                     output_read + ".window." + str(w) + ".stringency." + str(s) + ".png")
 
 
 if __name__ == "__main__":
