@@ -13,8 +13,18 @@ import wotplot
 #             - -1: k1 != k2, and ReverseComplement(k1) == k2
 #             -  0: k1 != k2, and ReverseComplement(k1) != k2
 
+def get_color_for_value(value):
+    if value == 2:
+        return "black"
+    if value == 1:
+        return "green"
+    if value == -1:
+        return "red"
+    return "white"
+
+
 def dotplot(seqA, seqB, w):
-    return wotplot.DotPlotMatrix(seqA, seqB, w, binary=False)
+    return wotplot.DotPlotMatrix(seqA, seqB, w, binary=False, yorder="TB")
 
 
 def root_file_name_sans_dir(file_name):
@@ -28,48 +38,34 @@ def get_start_index_from_label(label):
     return int(label.split("_")[1])
 
 
-def dotplot2Graphics(dpo, labelA, labelB, heading, filename):
+def dotplot2Graphics(dpo, label_x, labelB, heading, filename):
     # create a new figure
     dp = dpo.mat
-    print(dp)
-    # exit(1)
     fig, ax = plt.subplots()
 
-    # plot the dots using a scatter plot
-    # need where to get the indices of the entries in dp that greater than or equal to s
-    # rows, cols = np.where(dp >= s)
-    # rows, cols = np.where(dp)
-    # ax.scatter(cols, rows, marker='.', color='black')
-    ax.spy(dp, marker='.', markersize=1, color='black')
-    labelAUse = root_file_name_sans_dir(labelA)
-    labelBUse = root_file_name_sans_dir(labelB)
+    ax.spy(dp, marker='.', markersize=2, color='black', origin='lower')
+    label_x_use = root_file_name_sans_dir(label_x)
+    label_y_use = root_file_name_sans_dir(labelB)
 
     # determine labelEvery to have 10 labels on the x axis
-    labelEvery = dp.shape[1] // 10
-    ax.set_xticks(np.arange(0, dp.shape[1], labelEvery))
-    startx = get_start_index_from_label(labelBUse)
-    ax.set_xticklabels(np.arange(startx, startx + dp.shape[1], labelEvery))
-
-    # determine labelEvery to have 10 labels on the y axis
-    labelEvery = dp.shape[0] // 10
-    ax.set_yticks(np.arange(0, dp.shape[0], labelEvery))
-    starty = get_start_index_from_label(labelAUse)
-    ax.set_yticklabels(np.arange(starty, starty + dp.shape[0], labelEvery))
+    label_every = dp.shape[1] // 10
+    ax.set_xticks(np.arange(0, dp.shape[1], label_every))
+    start_x = get_start_index_from_label(label_x_use)
+    ax.set_xticklabels(np.arange(start_x, start_x + dp.shape[1], label_every))
+    #
+    # # determine labelEvery to have 10 labels on the y axis
+    label_every = dp.shape[0] // 10
+    ax.set_yticks(np.arange(0, dp.shape[0], label_every))
+    start_y = get_start_index_from_label(label_y_use)
+    ax.set_yticklabels(np.arange(start_y, start_y + dp.shape[0], label_every))
 
     # set the labels and title
-    ax.set_xlabel(root_file_name_sans_dir(labelBUse))
-    ax.set_ylabel(root_file_name_sans_dir(labelAUse))
+    ax.set_xlabel(root_file_name_sans_dir(label_x_use))
+    ax.set_ylabel(root_file_name_sans_dir(label_y_use))
     ax.set_title(heading)
 
-    # add a transparent rectangle to highlight the region of interest from x=181 to x=13993 and the max y index, colored green
-    ax.add_patch(plt.Rectangle((18000, 0), 100, dp.shape[0], fill=True, color='green', alpha=0.2))
-    ax.add_patch(plt.Rectangle((0, 18000), dp.shape[1], 100, fill=True, color='blue', alpha=0.2))
-
-    # ax.add_patch(plt.Rectangle((15877, 0), 17586 - 15877, dp.shape[0], fill=True, color='purple', alpha=0.2))
-    # ax.add_patch(plt.Rectangle((13994, 0), 17586 - 15877, dp.shape[0], fill=True, color='yellow', alpha=0.2))
-    # ax.add_patch(plt.Rectangle((0, 0), dp.shape[1], 13812, fill=True, color='green', alpha=0.2))
-    # ax.add_patch(plt.Rectangle((17980, 0), 10, 1710, fill=True, color='blue', alpha=0.2))
-
+    # ax.add_patch(plt.Rectangle((18000, 0), 100, dp.shape[0], fill=True, color='green', alpha=0.2))
+    # ax.add_patch(plt.Rectangle((0, 18000), dp.shape[1], 100, fill=True, color='blue', alpha=0.2))
     # save the figure to a file and display it on screen
     plt.gcf().set_size_inches(25, 25)
     print("saving png file: ", filename)
@@ -100,22 +96,22 @@ def use_read(read):
     return not has_hard_clipping(read) and not non_primary_alignment(read)
 
 
-def dot_fasta_vs_fasta(fastaA, fastaB, k, output):
-    with open(fastaA) as fileA:
-        seqA = "".join([line.strip() for line in fileA if not line.startswith(">")])
-    seqA = seqA.upper()
-    with open(fastaB) as fileB:
-        seqB = "".join([line.strip() for line in fileB if not line.startswith(">")])
-    seqB = seqB.upper()
+def dot_fasta_vs_fasta(reference_seq_file, compSeq, k, output):
+    with open(reference_seq_file) as fileA:
+        seq_ref = "".join([line.strip() for line in fileA if not line.startswith(">")])
+    seq_ref = seq_ref.upper()
+    with open(compSeq) as fileB:
+        seq_comp = "".join([line.strip() for line in fileB if not line.startswith(">")])
+    seq_comp = seq_comp.upper()
 
-    print("length of seqA: ", len(seqA))
-    print("length of seqB: ", len(seqB))
-    dp = dotplot(seqA, seqB, k)
-    dotplot2Graphics(dp, fastaA, fastaB, root_file_name_sans_dir(fastaA) + " vs " + root_file_name_sans_dir(fastaB),
+    print("length of seqA: ", len(seq_ref))
+    print("length of seqB: ", len(seq_comp))
+    dp = dotplot(seq_ref, seq_comp, k)
+    dotplot2Graphics(dp, reference_seq_file, compSeq, root_file_name_sans_dir(reference_seq_file) + " vs " + root_file_name_sans_dir(compSeq),
                      output + ".k." + str(k) + ".png")
 
 
-def dot_read(read, reference_seq_file, k):
+def dot_read(reference_seq_file, read, k):
     if not use_read(read):
         print("skipping read ", read.query_name, " because it is not primary alignment or has hard clipping")
         return None
@@ -123,17 +119,11 @@ def dot_read(read, reference_seq_file, k):
         reference_seq = "".join([line.strip() for line in fileB if not line.startswith(">")])
     reference_seq = reference_seq.upper()
 
-    seqA = read.seq
-
     print("read name: ", read.query_name)
-    print("length of seqA: ", len(seqA))
-    print("length of seqB: ", len(reference_seq))
-    # Take the reverse complement of the first sequence if requested
-    if read.is_reverse:
-        # seqA = seqA[::-1].translate(str.maketrans("ACGT", "TGCA"))
-        print("Taking the reverse complement of the first sequence")
+    print("length of read: ", len(read.seq))
+    print("length of ref: ", len(reference_seq))
 
-    return dotplot(seqA, reference_seq, k)
+    return dotplot(reference_seq, read.seq, k)
 
 
 def main():
@@ -144,9 +134,12 @@ def main():
     parser.add_argument("--reference_seq", help="the filename of reference in FASTA format")
     parser.add_argument("--compSeq", help="the filename of a second sequence in FASTA format")
     parser.add_argument("--output", help="the root output filename for the dotplot")
-    parser.add_argument("--threads", type=int, help="the number of threads to use", default=8)
     args = parser.parse_args()
 
+    # if bam and compSeq arguments are both provided, exit
+    if args.bam and args.compSeq:
+        print("Please provide either a BAM file or a second sequence (compSeq) in FASTA format, not both.")
+        return
     # if compSeq argument is provided, generate a dotplot from two sequences in FASTA format
     if args.compSeq:
         dot_fasta_vs_fasta(args.reference_seq, args.compSeq, args.k, args.output)
@@ -157,8 +150,8 @@ def main():
         if not use_read(read):
             print("skipping read ", read.query_name, " because it is not primary alignment or has hard clipping")
             continue
-        dp = dot_read(read, args.reference_seq, args.k)
-        dotplot2Graphics(dp, read.query_name, args.reference_seq,
+        dp = dot_read(args.reference_seq, read, args.k)
+        dotplot2Graphics(dp, args.reference_seq, read.query_name,
                          read.query_name + " vs " + root_file_name_sans_dir(args.reference_seq),
                          get_png_file_for_read(read, args.k, args.output))
 
