@@ -6,8 +6,15 @@ import cigar
 import wotplot
 
 
+# https://github.com/fedarko/wotplot/blob/a61953c504bea7167cc06a29529d269fec09a9c6/wotplot/_matrix.py#L73C1-L77C60
+#
+#             -  2: k1 == k2, and ReverseComplement(k1) == k2
+#             -  1: k1 == k2, and ReverseComplement(k1) != k2
+#             - -1: k1 != k2, and ReverseComplement(k1) == k2
+#             -  0: k1 != k2, and ReverseComplement(k1) != k2
+
 def dotplot(seqA, seqB, w):
-    return wotplot.DotPlotMatrix(seqA, seqB, w, binary=False).mat
+    return wotplot.DotPlotMatrix(seqA, seqB, w, binary=False)
 
 
 def root_file_name_sans_dir(file_name):
@@ -21,16 +28,19 @@ def get_start_index_from_label(label):
     return int(label.split("_")[1])
 
 
-def dotplot2Graphics(dp, s, labelA, labelB, heading, filename):
+def dotplot2Graphics(dpo, labelA, labelB, heading, filename):
     # create a new figure
+    dp = dpo.mat
+    print(dp)
+    # exit(1)
     fig, ax = plt.subplots()
 
     # plot the dots using a scatter plot
     # need where to get the indices of the entries in dp that greater than or equal to s
-    rows, cols = np.where(dp >= s)
+    # rows, cols = np.where(dp >= s)
     # rows, cols = np.where(dp)
-    ax.scatter(cols, rows, marker='.', color='black')
-
+    # ax.scatter(cols, rows, marker='.', color='black')
+    ax.spy(dp, marker='.', markersize=1, color='black')
     labelAUse = root_file_name_sans_dir(labelA)
     labelBUse = root_file_name_sans_dir(labelB)
 
@@ -62,14 +72,14 @@ def dotplot2Graphics(dp, s, labelA, labelB, heading, filename):
 
     # save the figure to a file and display it on screen
     plt.gcf().set_size_inches(25, 25)
+    print("saving png file: ", filename)
     plt.savefig(filename, dpi=300, bbox_inches='tight')
-    # plt.show()
 
 
-def get_png_file_for_read(read, w, s, output):
+def get_png_file_for_read(read, k, output):
     sanitized_read_name = read.query_name.replace("/", "_")
     output_read = output + "." + sanitized_read_name
-    cache_file = output_read + ".window." + str(w) + ".s." + str(s) + ".png"
+    cache_file = output_read + ".k." + str(k) + ".png"
     return cache_file
 
 
@@ -90,7 +100,7 @@ def use_read(read):
     return not has_hard_clipping(read) and not non_primary_alignment(read)
 
 
-def dot_fasta_vs_fasta(fastaA, fastaB, w, s, output):
+def dot_fasta_vs_fasta(fastaA, fastaB, k, output):
     with open(fastaA) as fileA:
         seqA = "".join([line.strip() for line in fileA if not line.startswith(">")])
     seqA = seqA.upper()
@@ -100,12 +110,12 @@ def dot_fasta_vs_fasta(fastaA, fastaB, w, s, output):
 
     print("length of seqA: ", len(seqA))
     print("length of seqB: ", len(seqB))
-    dp = dotplot(seqA, seqB, w)
-    dotplot2Graphics(dp, s, fastaA, fastaB, root_file_name_sans_dir(fastaA) + " vs " + root_file_name_sans_dir(fastaB),
-                     output + ".window." + str(w) + ".s." + str(s) + ".png")
+    dp = dotplot(seqA, seqB, k)
+    dotplot2Graphics(dp, fastaA, fastaB, root_file_name_sans_dir(fastaA) + " vs " + root_file_name_sans_dir(fastaB),
+                     output + ".k." + str(k) + ".png")
 
 
-def dot_read(read, reference_seq_file, w):
+def dot_read(read, reference_seq_file, k):
     if not use_read(read):
         print("skipping read ", read.query_name, " because it is not primary alignment or has hard clipping")
         return None
@@ -123,14 +133,13 @@ def dot_read(read, reference_seq_file, w):
         # seqA = seqA[::-1].translate(str.maketrans("ACGT", "TGCA"))
         print("Taking the reverse complement of the first sequence")
 
-    return dotplot(seqA, reference_seq, w)
+    return dotplot(seqA, reference_seq, k)
 
 
 def main():
     # Define the command line arguments
     parser = argparse.ArgumentParser(description="Generate a dotplot from two sequences in FASTA format.")
-    parser.add_argument("--w", type=int, help="the window size")
-    parser.add_argument("--s", type=int, help="the stringency")
+    parser.add_argument("--k", type=int, help="kmer size")
     parser.add_argument("--bam", help="the bam file of sequences")
     parser.add_argument("--reference_seq", help="the filename of reference in FASTA format")
     parser.add_argument("--compSeq", help="the filename of a second sequence in FASTA format")
@@ -140,7 +149,7 @@ def main():
 
     # if compSeq argument is provided, generate a dotplot from two sequences in FASTA format
     if args.compSeq:
-        dot_fasta_vs_fasta(args.reference_seq, args.compSeq, args.w, args.s, args.output)
+        dot_fasta_vs_fasta(args.reference_seq, args.compSeq, args.k, args.output)
         return
 
     a = pysam.AlignmentFile(args.bam, "rb")
@@ -148,10 +157,11 @@ def main():
         if not use_read(read):
             print("skipping read ", read.query_name, " because it is not primary alignment or has hard clipping")
             continue
-        dp = dot_read(read, args.reference_seq, args.w)
-        dotplot2Graphics(dp, args.s, read.query_name, args.reference_seq,
+        dp = dot_read(read, args.reference_seq, args.k)
+        dotplot2Graphics(dp, read.query_name, args.reference_seq,
                          read.query_name + " vs " + root_file_name_sans_dir(args.reference_seq),
-                         get_png_file_for_read(read, args.w, args.s, args.output))
+                         get_png_file_for_read(read, args.k, args.output))
+
 
 if __name__ == "__main__":
     main()
