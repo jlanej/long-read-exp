@@ -23,8 +23,8 @@ def get_color_for_value(value):
     return "white"
 
 
-def dotplot(seqA, seqB, w):
-    return wotplot.DotPlotMatrix(seqA, seqB, w, binary=False, yorder="TB")
+def dotplot(seq1, seq2, w):
+    return wotplot.DotPlotMatrix(seq1, seq2, w, binary=False, yorder="TB")
 
 
 def root_file_name_sans_dir(file_name):
@@ -38,14 +38,14 @@ def get_start_index_from_label(label):
     return int(label.split("_")[1])
 
 
-def dotplot2Graphics(dpo, label_x, labelB, heading, filename):
+def dotplot2Graphics(dpo, label_x, label_y, heading, filename):
     # create a new figure
     dp = dpo.mat
     fig, ax = plt.subplots()
 
     ax.spy(dp, marker='.', markersize=2, color='black', origin='lower')
     label_x_use = root_file_name_sans_dir(label_x)
-    label_y_use = root_file_name_sans_dir(labelB)
+    label_y_use = root_file_name_sans_dir(label_y)
 
     # determine labelEvery to have 10 labels on the x axis
     label_every = dp.shape[1] // 10
@@ -104,8 +104,8 @@ def dot_fasta_vs_fasta(reference_seq_file, compSeq, k, output):
         seq_comp = "".join([line.strip() for line in fileB if not line.startswith(">")])
     seq_comp = seq_comp.upper()
 
-    print("length of seqA: ", len(seq_ref))
-    print("length of seqB: ", len(seq_comp))
+    print("length of ref seq: ", len(seq_ref))
+    print("length of comp seq: ", len(seq_comp))
     dp = dotplot(seq_ref, seq_comp, k)
     dotplot2Graphics(dp, reference_seq_file, compSeq, root_file_name_sans_dir(reference_seq_file) + " vs " + root_file_name_sans_dir(compSeq),
                      output + ".k." + str(k) + ".png")
