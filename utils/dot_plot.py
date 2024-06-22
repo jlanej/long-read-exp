@@ -242,7 +242,7 @@ def add_cigar_to_fig(ax, read, min_indel, ref_loc):
                         ax.add_patch(
                             plt.Rectangle((xmin, read_index), xmax, c[0], fill=True,
                                           color=CIGAR_COLORS[c[1]],
-                                          alpha=0.1))
+                                          alpha=0.25))
                 read_index += c[0]
             else:
                 print("unknown cigar: ", c)
