@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 import pysam
 import cigar
 import wotplot
+from matplotlib.legend import Legend
 
 # https://github.com/fedarko/wotplot/blob/a61953c504bea7167cc06a29529d269fec09a9c6/wotplot/_matrix.py#L73C1-L77C60
 #
@@ -196,7 +197,6 @@ def collapse_cigar_colors():
     return color_groups
 
 def add_cigar_to_fig(ax, read, min_indel, ref_loc):
-    print(ref_loc)
     alignments = get_all_alignments(read)
     xmin, xmax = ax.get_xlim()
     ymin, ymax = ax.get_ylim()
@@ -230,7 +230,7 @@ def add_cigar_to_fig(ax, read, min_indel, ref_loc):
                 if c[0] > min_indel and same_chr:
                     ax.add_patch(
                         plt.Rectangle((ref_index, 0), c[0], ymax, fill=True, color=CIGAR_COLORS[c[1]],
-                                      alpha=0.1))
+                                      alpha=0.15))
                 ref_index += c[0]
                 # ax.add_patch(plt.Rectangle((rect_x, read_index), xmax, c[0], fill=True, color=CIGAR_COLORS[c[1]], alpha=0.25))
             elif c[1] in ["I"]:
@@ -242,16 +242,19 @@ def add_cigar_to_fig(ax, read, min_indel, ref_loc):
                         ax.add_patch(
                             plt.Rectangle((xmin, read_index), xmax, c[0], fill=True,
                                           color=CIGAR_COLORS[c[1]],
-                                          alpha=0.25))
+                                          alpha=0.15))
                 read_index += c[0]
             else:
                 print("unknown cigar: ", c)
     #add a color legend for the CIGAR colors
     groups=collapse_cigar_colors()
+    keys= groups.keys().sort()
     legend_elements = [
         plt.Line2D([0], [0], marker='o', color='w', label=groups[i], markerfacecolor=i,
-                   markersize=10) for i in groups.keys()]
-    ax.legend(handles=legend_elements, loc='lower right', title="CIGAR colors")
+                   markersize=10) for i in keys]
+    labels = [groups[i] for i in keys]
+    leg=Legend(ax, legend_elements, loc='lower right', title="CIGAR colors",labels=labels)
+    ax.add_artist(leg)
     return ax
 
 
