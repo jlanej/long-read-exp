@@ -5,7 +5,6 @@ import pysam
 import cigar
 import wotplot
 
-
 # https://github.com/fedarko/wotplot/blob/a61953c504bea7167cc06a29529d269fec09a9c6/wotplot/_matrix.py#L73C1-L77C60
 #
 #             -  2: k1 == k2, and ReverseComplement(k1) == k2
@@ -19,6 +18,7 @@ COLORS = {
     -1: "red",
     0: "white"
 }
+
 
 def get_color_for_value(value):
     return COLORS[value]
@@ -42,7 +42,8 @@ def get_start_index_from_label(label):
 def get_sparse_subset_by_value(matrix, value):
     return matrix.mat == value
 
-def dotplot2Graphics(dpo, label_x, label_y, heading, filename):
+
+def dotplot2Graphics(dpo, label_x, label_y, heading, filename, marker_size):
     # create a new figure
     dp = dpo.mat
     fig, ax = plt.subplots()
@@ -50,8 +51,11 @@ def dotplot2Graphics(dpo, label_x, label_y, heading, filename):
     # ax.spy(dp, marker='.', markersize=2, color='black', origin='lower')
     # loop over the possible values in the matrix and plot them
     for i in COLORS.keys():
+        # skip 0
+        if i == 0:
+            continue
         subset = get_sparse_subset_by_value(dpo, i)
-        ax.spy(subset, marker='.', markersize=2, color=get_color_for_value(i), origin='lower')
+        ax.spy(subset, marker='.', markersize=marker_size, color=get_color_for_value(i), origin='lower')
 
     label_x_use = root_file_name_sans_dir(label_x)
     label_y_use = root_file_name_sans_dir(label_y)
@@ -105,7 +109,7 @@ def use_read(read):
     return not has_hard_clipping(read) and not non_primary_alignment(read)
 
 
-def dot_fasta_vs_fasta(reference_seq_file, compSeq, k, output):
+def dot_fasta_vs_fasta(reference_seq_file, compSeq, k, output, marker_size):
     with open(reference_seq_file) as fileA:
         seq_ref = "".join([line.strip() for line in fileA if not line.startswith(">")])
     seq_ref = seq_ref.upper()
@@ -116,11 +120,12 @@ def dot_fasta_vs_fasta(reference_seq_file, compSeq, k, output):
     print("length of ref seq: ", len(seq_ref))
     print("length of comp seq: ", len(seq_comp))
     dp = dotplot(seq_ref, seq_comp, k)
-    dotplot2Graphics(dp, reference_seq_file, compSeq, root_file_name_sans_dir(reference_seq_file) + " vs " + root_file_name_sans_dir(compSeq),
-                     output + ".k." + str(k) + ".png")
+    dotplot2Graphics(dp, reference_seq_file, compSeq,
+                     root_file_name_sans_dir(reference_seq_file) + " vs " + root_file_name_sans_dir(compSeq),
+                     output + ".k." + str(k) + ".png", marker_size)
 
 
-def dot_read(reference_seq_file, read, k):
+def dot_read(reference_seq_file, read, k, marker_size):
     if not use_read(read):
         print("skipping read ", read.query_name, " because it is not primary alignment or has hard clipping")
         return None
@@ -132,7 +137,7 @@ def dot_read(reference_seq_file, read, k):
     print("length of read: ", len(read.seq))
     print("length of ref: ", len(reference_seq))
 
-    return dotplot(reference_seq, read.seq, k)
+    return dotplot(reference_seq, read.seq, k, marker_size)
 
 
 def main():
@@ -143,6 +148,8 @@ def main():
     parser.add_argument("--reference_seq", help="the filename of reference in FASTA format")
     parser.add_argument("--compSeq", help="the filename of a second sequence in FASTA format")
     parser.add_argument("--output", help="the root output filename for the dotplot")
+    # marker size with a default value of 4
+    parser.add_argument("--marker_size", type=int, default=4, help="the size of the markers in the dotplot")
     args = parser.parse_args()
 
     # if bam and compSeq arguments are both provided, exit
@@ -151,7 +158,7 @@ def main():
         return
     # if compSeq argument is provided, generate a dotplot from two sequences in FASTA format
     if args.compSeq:
-        dot_fasta_vs_fasta(args.reference_seq, args.compSeq, args.k, args.output)
+        dot_fasta_vs_fasta(args.reference_seq, args.compSeq, args.k, args.output, args.marker_size)
         return
 
     a = pysam.AlignmentFile(args.bam, "rb")
@@ -162,7 +169,7 @@ def main():
         dp = dot_read(args.reference_seq, read, args.k)
         dotplot2Graphics(dp, args.reference_seq, read.query_name,
                          read.query_name + " vs " + root_file_name_sans_dir(args.reference_seq),
-                         get_png_file_for_read(read, args.k, args.output))
+                         get_png_file_for_read(read, args.k, args.output), args.marker_size)
 
 
 if __name__ == "__main__":
