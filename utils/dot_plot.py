@@ -1,92 +1,107 @@
 import argparse
-import os
-import sys
-
 import numpy as np
 import matplotlib.pyplot as plt
 import pysam
-import gzip
 import cigar
+import wotplot
 
-from multiprocessing.dummy import Pool as ThreadPool
+# https://github.com/fedarko/wotplot/blob/a61953c504bea7167cc06a29529d269fec09a9c6/wotplot/_matrix.py#L73C1-L77C60
+#
+#             -  2: k1 == k2, and ReverseComplement(k1) == k2
+#             -  1: k1 == k2, and ReverseComplement(k1) != k2
+#             - -1: k1 != k2, and ReverseComplement(k1) == k2
+#             -  0: k1 != k2, and ReverseComplement(k1) != k2
+
+COLORS = {
+    2: "black",
+    1: "green",
+    -1: "red",
+    0: "white"
+}
+COLOR_DESCRIPTIONS = {
+    2: "palindrome",
+    1: "forward match",
+    -1: "reverse complement match",
+    0: "no match"
+}
 
 
-# adapted from https://medium.com/@anoopjohny2000/visualizing-sequence-similarity-with-dotplots-in-python-f5cf0ac8559f#:~:text=To%20create%20a%20Dot%20plot,with%20ungapped%20alignment%20and%20wordsize.
-def dotplot(seqA, seqB, w):
-    # Initialize the dotplot matrix with zeros
-    dp = np.zeros((len(seqA), len(seqB)), dtype=int)
-    window_b_cache = {}
-    # Iterate over all positions in seqA and seqB
-    for i in range(len(seqA)):
-        if i % 100 == 0:
-            print(f"processing base {i} of {len(seqA)}")
+def get_color_for_value(value):
+    return COLORS[value]
 
-        # Compute the window around position i in seqA
-        windowA = seqA[max(i - w, 0):min(i + w + 1, len(seqA))]
-        for j in range(len(seqB)):
-            # Compute the window around position j in seqB
-            if j not in window_b_cache:
-                window_b_cache[j] = seqB[max(j - w, 0):min(j + w + 1, len(seqB))]
-            windowB = window_b_cache[j]
-            # Count the number of matching symbols in the window
-            matches = sum([1 for x, y in zip(windowA, windowB) if x == y])
 
-            # Set the matrix element to 1 if the number of matches is at least s
-            dp[i, j] = matches
-
-            # print(f"match at {i}, {j} with {matches} matches")
-
-    return dp
+def dotplot(seq1, seq2, w):
+    return wotplot.DotPlotMatrix(seq1, seq2, w, binary=False, yorder="TB")
 
 
 def root_file_name_sans_dir(file_name):
     return file_name.split("/")[-1].split(".")[0]
 
 
-def dotplot2Graphics(dp, s, labelA, labelB, heading, filename):
+def get_start_index_from_label(label):
+    #     if the first _ delimited entry does not start with chr, return 0
+    if not label.split("_")[0].startswith("chr"):
+        return 0
+    return int(label.split("_")[1])
+
+
+def get_sparse_subset_by_value(matrix, value):
+    return matrix.mat == value
+
+
+def plot_dot(dpo, label_x, label_y, heading, filename, marker_size):
     # create a new figure
+    dp = dpo.mat
     fig, ax = plt.subplots()
 
-    # plot the dots using a scatter plot
-    # need where to get the indices of the entries in dp that greater than or equal to s
-    rows, cols = np.where(dp >= s)
-    # rows, cols = np.where(dp)
-    ax.scatter(cols, rows, marker='.', color='black')
+    # ax.spy(dp, marker='.', markersize=2, color='black', origin='lower')
+    # loop over the possible values in the matrix and plot them
+    for i in COLORS.keys():
+        # skip 0
+        if i == 0:
+            continue
+        subset = get_sparse_subset_by_value(dpo, i)
+        ax.spy(subset, marker='.', markersize=marker_size, color=get_color_for_value(i), origin='lower', alpha=0.5)
 
-    # relabel the x axis to start at 33044948
-    ax.set_xticks(np.arange(0, dp.shape[1], 5000))
-    ax.set_xticklabels(np.arange(33044948, 33044948 + dp.shape[1], 5000))
+    # Add a legend describing the colors
+    legend_elements = [
+        plt.Line2D([0], [0], marker='o', color='w', label=COLOR_DESCRIPTIONS[i], markerfacecolor=COLORS[i],
+                   markersize=10) for i in COLORS.keys() if i != 0]
+    ax.legend(handles=legend_elements, loc='upper right')
 
+    # set the x and y axis labels
+    label_x_use = root_file_name_sans_dir(label_x)
+    label_y_use = root_file_name_sans_dir(label_y)
+
+    # determine labelEvery to have 10 labels on the x axis
+    label_every = dp.shape[1] // 10
+    ax.set_xticks(np.arange(0, dp.shape[1], label_every))
+    start_x = get_start_index_from_label(label_x_use)
+    ax.set_xticklabels(np.arange(start_x, start_x + dp.shape[1], label_every))
+    #
+    # # determine labelEvery to have 10 labels on the y axis
+    label_every = dp.shape[0] // 10
+    ax.set_yticks(np.arange(0, dp.shape[0], label_every))
+    start_y = get_start_index_from_label(label_y_use)
+    ax.set_yticklabels(np.arange(start_y, start_y + dp.shape[0], label_every))
 
     # set the labels and title
-    ax.set_xlabel(root_file_name_sans_dir(labelB))
-    ax.set_ylabel(root_file_name_sans_dir(labelA))
+    ax.set_xlabel(root_file_name_sans_dir(label_x_use))
+    ax.set_ylabel(root_file_name_sans_dir(label_y_use))
     ax.set_title(heading)
 
-    # add a transparent rectangle to highlight the region of interest from x=181 to x=13993 and the max y index, colored green
-    # ax.add_patch(plt.Rectangle((181, 0), 13993 - 181, dp.shape[0], fill=True, color='green', alpha=0.2))
-    # ax.add_patch(plt.Rectangle((15877, 0), 17586 - 15877, dp.shape[0], fill=True, color='purple', alpha=0.2))
-    # ax.add_patch(plt.Rectangle((13994, 0), 17586 - 15877, dp.shape[0], fill=True, color='yellow', alpha=0.2))
-    # ax.add_patch(plt.Rectangle((0, 0), dp.shape[1], 13812, fill=True, color='green', alpha=0.2))
-    # ax.add_patch(plt.Rectangle((0, 13812), dp.shape[1], 1710, fill=True, color='blue', alpha=0.2))
-
+    # ax.add_patch(plt.Rectangle((18000, 0), 100, dp.shape[0], fill=True, color='green', alpha=0.2))
+    # ax.add_patch(plt.Rectangle((0, 18000), dp.shape[1], 100, fill=True, color='blue', alpha=0.2))
     # save the figure to a file and display it on screen
     plt.gcf().set_size_inches(25, 25)
+    print("saving png file: ", filename)
     plt.savefig(filename, dpi=300, bbox_inches='tight')
-    # plt.show()
 
 
-def get_cache_file_for_read(read, w, output):
+def get_png_file_for_read(read, k, output):
     sanitized_read_name = read.query_name.replace("/", "_")
     output_read = output + "." + sanitized_read_name
-    cache_file = output_read + ".window." + str(w) + ".npy.gz"
-    return cache_file
-
-
-def get_png_file_for_read(read, w, s, output):
-    sanitized_read_name = read.query_name.replace("/", "_")
-    output_read = output + "." + sanitized_read_name
-    cache_file = output_read + ".window." + str(w) + ".s." + str(s) + ".png"
+    cache_file = output_read + ".k." + str(k) + ".png"
     return cache_file
 
 
@@ -106,98 +121,68 @@ def non_primary_alignment(read):
 def use_read(read):
     return not has_hard_clipping(read) and not non_primary_alignment(read)
 
-def dot_fasta_vs_fasta(fastaA, fastaB, w, s, output):
-    with open(fastaA) as fileA:
-        seqA = "".join([line.strip() for line in fileA if not line.startswith(">")])
-    seqA = seqA.upper()
-    with open(fastaB) as fileB:
-        seqB = "".join([line.strip() for line in fileB if not line.startswith(">")])
-    seqB = seqB.upper()
 
-    print("length of seqA: ", len(seqA))
-    print("length of seqB: ", len(seqB))
+def dot_fasta_vs_fasta(reference_seq_file, compSeq, k, output, marker_size):
+    with open(reference_seq_file) as fileA:
+        seq_ref = "".join([line.strip() for line in fileA if not line.startswith(">")])
+    seq_ref = seq_ref.upper()
+    with open(compSeq) as fileB:
+        seq_comp = "".join([line.strip() for line in fileB if not line.startswith(">")])
+    seq_comp = seq_comp.upper()
 
-    # if the cache file does not exist ,generate the dp and save it
-    cache_file = output + ".window." + str(w) + ".npy.gz"
-    if not os.path.exists(cache_file):
-        dp = dotplot(seqA, seqB, w)
-        f = gzip.GzipFile(cache_file, "w")
-        np.save(f, dp)
-        f.close()
-    else:
-        print(cache_file, " already exists")
-    dp = load_dot(cache_file)
-    dotplot2Graphics(dp, s, fastaA, fastaB, root_file_name_sans_dir(fastaA) + " vs " + root_file_name_sans_dir(fastaB), output + ".window." + str(w) + ".s." + str(s) + ".png")
+    print("length of ref seq: ", len(seq_ref))
+    print("length of comp seq: ", len(seq_comp))
+    dp = dotplot(seq_ref, seq_comp, k)
+    plot_dot(dp, reference_seq_file, compSeq,
+             root_file_name_sans_dir(reference_seq_file) + " vs " + root_file_name_sans_dir(compSeq) + "\nk=" + str(k),
+             output + ".k." + str(k) + ".png", marker_size)
 
-def prep_dot(read, reference_seq_file, w, output):
+
+def dot_read(reference_seq_file, read, k):
     if not use_read(read):
         print("skipping read ", read.query_name, " because it is not primary alignment or has hard clipping")
         return None
-    cache_file = get_cache_file_for_read(read, w, output)
     with open(reference_seq_file) as fileB:
         reference_seq = "".join([line.strip() for line in fileB if not line.startswith(">")])
     reference_seq = reference_seq.upper()
 
-    seqA = read.seq
-
     print("read name: ", read.query_name)
-    print("cache file: ", cache_file)
-    print("length of seqA: ", len(seqA))
-    print("length of seqB: ", len(reference_seq))
-    # Take the reverse complement of the first sequence if requested
-    if read.is_reverse:
-        # seqA = seqA[::-1].translate(str.maketrans("ACGT", "TGCA"))
-        print("Taking the reverse complement of the first sequence")
+    print("length of read: ", len(read.seq))
+    print("length of ref: ", len(reference_seq))
 
-    # if the cache file does not exist ,generate the dp and save it
-    if not os.path.exists(cache_file):
-        dp = dotplot(seqA, reference_seq, w)
-        f = gzip.GzipFile(cache_file, "w")
-        np.save(f, dp)
-        f.close()
-    else:
-        print(cache_file, " already exists")
-    return cache_file
+    return dotplot(reference_seq, read.seq, k)
 
-
-def load_dot(cache_file):
-    print("loading ", cache_file)
-    f = gzip.GzipFile(cache_file, "r")
-    dp = np.load(f)
-    f.close()
-    return dp
 
 def main():
     # Define the command line arguments
     parser = argparse.ArgumentParser(description="Generate a dotplot from two sequences in FASTA format.")
-    parser.add_argument("--w", type=int, help="the window size")
-    parser.add_argument("--s", type=int, help="the stringency")
+    parser.add_argument("--k", type=int, help="kmer size")
     parser.add_argument("--bam", help="the bam file of sequences")
     parser.add_argument("--reference_seq", help="the filename of reference in FASTA format")
     parser.add_argument("--compSeq", help="the filename of a second sequence in FASTA format")
     parser.add_argument("--output", help="the root output filename for the dotplot")
-    parser.add_argument("--threads", type=int, help="the number of threads to use", default=8)
+    # marker size with a default value of 4
+    parser.add_argument("--marker_size", type=int, default=4, help="the size of the markers in the dotplot")
     args = parser.parse_args()
 
+    # if bam and compSeq arguments are both provided, exit
+    if args.bam and args.compSeq:
+        print("Please provide either a BAM file or a second sequence (compSeq) in FASTA format, not both.")
+        return
     # if compSeq argument is provided, generate a dotplot from two sequences in FASTA format
     if args.compSeq:
-        dot_fasta_vs_fasta(args.reference_seq, args.compSeq, args.w, args.s, args.output)
+        dot_fasta_vs_fasta(args.reference_seq, args.compSeq, args.k, args.output, args.marker_size)
         return
 
-    threads = args.threads
-    print("using ", threads, " threads")
-    pool = ThreadPool(threads)
-    pool.map(lambda r: prep_dot(r, args.reference_seq, args.w, args.output), pysam.AlignmentFile(args.bam, "rb"))
-    pool.close()
     a = pysam.AlignmentFile(args.bam, "rb")
     for read in a:
         if not use_read(read):
             print("skipping read ", read.query_name, " because it is not primary alignment or has hard clipping")
             continue
-        cache_file = get_cache_file_for_read(read, args.w, args.output)
-        dp = load_dot(cache_file)
-        dotplot2Graphics(dp, args.s, read.query_name, args.reference_seq, read.query_name + " vs " +root_file_name_sans_dir(args.reference_seq),
-                         get_png_file_for_read(read, args.w, args.s, args.output))
+        dp = dot_read(args.reference_seq, read, args.k)
+        plot_dot(dp, args.reference_seq, read.query_name,
+                 read.query_name + " vs " + root_file_name_sans_dir(args.reference_seq) + "\nk=" + str(args.k),
+                 get_png_file_for_read(read, args.k, args.output), args.marker_size)
 
 
 if __name__ == "__main__":
