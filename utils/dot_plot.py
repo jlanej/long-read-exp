@@ -230,7 +230,7 @@ def add_cigar_to_fig(ax, read, min_indel, ref_loc):
                 if c[0] > min_indel and same_chr:
                     ax.add_patch(
                         plt.Rectangle((ref_index, 0), c[0], ymax, fill=True, color=CIGAR_COLORS[c[1]],
-                                      alpha=0.05))
+                                      alpha=0.1))
                 ref_index += c[0]
                 # ax.add_patch(plt.Rectangle((rect_x, read_index), xmax, c[0], fill=True, color=CIGAR_COLORS[c[1]], alpha=0.25))
             elif c[1] in ["I"]:
@@ -242,7 +242,7 @@ def add_cigar_to_fig(ax, read, min_indel, ref_loc):
                         ax.add_patch(
                             plt.Rectangle((xmin, read_index), xmax, c[0], fill=True,
                                           color=CIGAR_COLORS[c[1]],
-                                          alpha=0.05))
+                                          alpha=0.1))
                 read_index += c[0]
             else:
                 print("unknown cigar: ", c)
