@@ -13,14 +13,15 @@ import wotplot
 #             - -1: k1 != k2, and ReverseComplement(k1) == k2
 #             -  0: k1 != k2, and ReverseComplement(k1) != k2
 
+COLORS = {
+    2: "black",
+    1: "green",
+    -1: "red",
+    0: "white"
+}
+
 def get_color_for_value(value):
-    if value == 2:
-        return "black"
-    if value == 1:
-        return "green"
-    if value == -1:
-        return "red"
-    return "white"
+    return COLORS[value]
 
 
 def dotplot(seq1, seq2, w):
@@ -38,12 +39,20 @@ def get_start_index_from_label(label):
     return int(label.split("_")[1])
 
 
+def get_sparse_subset_by_value(matrix, value):
+    return matrix.mat == value
+
 def dotplot2Graphics(dpo, label_x, label_y, heading, filename):
     # create a new figure
     dp = dpo.mat
     fig, ax = plt.subplots()
 
-    ax.spy(dp, marker='.', markersize=2, color='black', origin='lower')
+    # ax.spy(dp, marker='.', markersize=2, color='black', origin='lower')
+    # loop over the possible values in the matrix and plot them
+    for i in COLORS.keys():
+        subset = get_sparse_subset_by_value(dpo, i)
+        ax.spy(subset, marker='.', markersize=2, color=get_color_for_value(i), origin='lower')
+
     label_x_use = root_file_name_sans_dir(label_x)
     label_y_use = root_file_name_sans_dir(label_y)
 
