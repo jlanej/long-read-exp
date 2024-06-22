@@ -11,23 +11,12 @@ import wotplot
 #             -  1: k1 == k2, and ReverseComplement(k1) != k2
 #             - -1: k1 != k2, and ReverseComplement(k1) == k2
 #             -  0: k1 != k2, and ReverseComplement(k1) != k2
-
 COLORS = {
-    2: "black",
-    1: "green",
-    -1: "red",
-    0: "white"
+    2: ["black", "palindrome"],
+    1: ["green", "forward match"],
+    -1: ["red", "reverse complement match"],
+    0: ["white", "no match"]
 }
-COLOR_DESCRIPTIONS = {
-    2: "palindrome",
-    1: "forward match",
-    -1: "reverse complement match",
-    0: "no match"
-}
-
-
-def get_color_for_value(value):
-    return COLORS[value]
 
 
 def dotplot(seq1, seq2, w):
@@ -49,27 +38,24 @@ def get_sparse_subset_by_value(matrix, value):
     return matrix.mat == value
 
 
-def plot_dot(dpo, label_x, label_y, heading, filename, marker_size):
+def plot_dot(dpo, ax, label_x, label_y, heading, marker_size):
     # create a new figure
     dp = dpo.mat
-    fig, ax = plt.subplots()
-
-    # ax.spy(dp, marker='.', markersize=2, color='black', origin='lower')
     # loop over the possible values in the matrix and plot them
     for i in COLORS.keys():
         # skip 0
         if i == 0:
             continue
         subset = get_sparse_subset_by_value(dpo, i)
-        ax.spy(subset, marker='.', markersize=marker_size, color=get_color_for_value(i), origin='lower', alpha=0.5)
+        ax.spy(subset, marker='.', markersize=marker_size, color=COLORS[i][0], origin='lower', alpha=0.5)
 
     # Add a legend describing the colors
     legend_elements = [
-        plt.Line2D([0], [0], marker='o', color='w', label=COLOR_DESCRIPTIONS[i], markerfacecolor=COLORS[i],
+        plt.Line2D([0], [0], marker='o', color='w', label=COLORS[i][1], markerfacecolor=COLORS[i][0],
                    markersize=10) for i in COLORS.keys() if i != 0]
     ax.legend(handles=legend_elements, loc='upper right')
 
-    # set the x and y axis labels
+    # set the x and y-axis labels
     label_x_use = root_file_name_sans_dir(label_x)
     label_y_use = root_file_name_sans_dir(label_y)
 
@@ -89,10 +75,10 @@ def plot_dot(dpo, label_x, label_y, heading, filename, marker_size):
     ax.set_xlabel(root_file_name_sans_dir(label_x_use))
     ax.set_ylabel(root_file_name_sans_dir(label_y_use))
     ax.set_title(heading)
+    return ax
 
-    # ax.add_patch(plt.Rectangle((18000, 0), 100, dp.shape[0], fill=True, color='green', alpha=0.2))
-    # ax.add_patch(plt.Rectangle((0, 18000), dp.shape[1], 100, fill=True, color='blue', alpha=0.2))
-    # save the figure to a file and display it on screen
+
+def save_plot(ax, filename):
     plt.gcf().set_size_inches(25, 25)
     print("saving png file: ", filename)
     plt.savefig(filename, dpi=300, bbox_inches='tight')
@@ -114,12 +100,8 @@ def has_hard_clipping(read):
     return False
 
 
-def non_primary_alignment(read):
-    return read.is_secondary or read.is_supplementary
-
-
 def use_read(read):
-    return not has_hard_clipping(read) and not non_primary_alignment(read)
+    return not has_hard_clipping(read)
 
 
 def dot_fasta_vs_fasta(reference_seq_file, compSeq, k, output, marker_size):
@@ -133,9 +115,12 @@ def dot_fasta_vs_fasta(reference_seq_file, compSeq, k, output, marker_size):
     print("length of ref seq: ", len(seq_ref))
     print("length of comp seq: ", len(seq_comp))
     dp = dotplot(seq_ref, seq_comp, k)
-    plot_dot(dp, reference_seq_file, compSeq,
-             root_file_name_sans_dir(reference_seq_file) + " vs " + root_file_name_sans_dir(compSeq) + "\nk=" + str(k),
-             output + ".k." + str(k) + ".png", marker_size)
+    fig, ax = plt.subplots()
+
+    ax = plot_dot(dp, ax, reference_seq_file, compSeq,
+                  root_file_name_sans_dir(reference_seq_file) + " vs " + root_file_name_sans_dir(
+                      compSeq) + "\nk=" + str(k), marker_size)
+    save_plot(ax, output + ".k." + str(k) + ".png")
 
 
 def dot_read(reference_seq_file, read, k):
@@ -152,6 +137,27 @@ def dot_read(reference_seq_file, read, k):
 
     return dotplot(reference_seq, read.seq, k)
 
+def get_all_alignments(read):
+    # store a string of chr:start-end for each alignment and the cigar string associated with it
+    alignments = []
+    # base=read.
+def add_cigar_to_fig(ax, read):
+    cr = cigar.Cigar(read.cigarstring)
+    x = 0
+    for c in cr.items():
+        if c[1] == "M":
+            ax.add_patch(plt.Rectangle((x, 0), c[0], 100, fill=True, color='blue', alpha=0.2))
+            x += c[0]
+        elif c[1] == "I":
+            ax.add_patch(plt.Rectangle((x, 0), c[0], 100, fill=True, color='green', alpha=0.2))
+            x += c[0]
+        elif c[1] == "D":
+            x += c[0]
+        elif c[1] == "H":
+            x += c[0]
+        else:
+            print("unknown cigar operation: ", c[1])
+
 
 def main():
     # Define the command line arguments
@@ -161,7 +167,6 @@ def main():
     parser.add_argument("--reference_seq", help="the filename of reference in FASTA format")
     parser.add_argument("--compSeq", help="the filename of a second sequence in FASTA format")
     parser.add_argument("--output", help="the root output filename for the dotplot")
-    # marker size with a default value of 4
     parser.add_argument("--marker_size", type=int, default=4, help="the size of the markers in the dotplot")
     args = parser.parse_args()
 
@@ -173,16 +178,27 @@ def main():
     if args.compSeq:
         dot_fasta_vs_fasta(args.reference_seq, args.compSeq, args.k, args.output, args.marker_size)
         return
+    elif args.bam:
+        process_bam(args)
+        return
+    else:
+        print("Please provide either a BAM file or a second sequence (compSeq) in FASTA format.")
+        return
 
+
+def process_bam(args):
     a = pysam.AlignmentFile(args.bam, "rb")
     for read in a:
-        if not use_read(read):
-            print("skipping read ", read.query_name, " because it is not primary alignment or has hard clipping")
+        if has_hard_clipping(read):
+            print("skipping read ", read.query_name, " because it has hard clipping")
             continue
         dp = dot_read(args.reference_seq, read, args.k)
-        plot_dot(dp, args.reference_seq, read.query_name,
-                 read.query_name + " vs " + root_file_name_sans_dir(args.reference_seq) + "\nk=" + str(args.k),
-                 get_png_file_for_read(read, args.k, args.output), args.marker_size)
+        fig, ax = plt.subplots()
+        fig.tight_layout()
+        ax = plot_dot(dp, ax, args.reference_seq, read.query_name,
+                      read.query_name + " vs " + root_file_name_sans_dir(args.reference_seq) + "\nk=" + str(args.k),
+                      args.marker_size)
+        save_plot(ax, get_png_file_for_read(read, args.k, args.output))
 
 
 if __name__ == "__main__":
