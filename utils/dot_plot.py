@@ -18,6 +18,12 @@ COLORS = {
     -1: "red",
     0: "white"
 }
+COLOR_DESCRIPTIONS = {
+    2: "palindrome",
+    1: "forward match",
+    -1: "reverse complement match",
+    0: "no match"
+}
 
 
 def get_color_for_value(value):
@@ -43,7 +49,7 @@ def get_sparse_subset_by_value(matrix, value):
     return matrix.mat == value
 
 
-def dotplot2Graphics(dpo, label_x, label_y, heading, filename, marker_size):
+def plot_dot(dpo, label_x, label_y, heading, filename, marker_size):
     # create a new figure
     dp = dpo.mat
     fig, ax = plt.subplots()
@@ -55,8 +61,15 @@ def dotplot2Graphics(dpo, label_x, label_y, heading, filename, marker_size):
         if i == 0:
             continue
         subset = get_sparse_subset_by_value(dpo, i)
-        ax.spy(subset, marker='.', markersize=marker_size, color=get_color_for_value(i), origin='lower')
+        ax.spy(subset, marker='.', markersize=marker_size, color=get_color_for_value(i), origin='lower', alpha=0.5)
 
+    # Add a legend describing the colors
+    legend_elements = [
+        plt.Line2D([0], [0], marker='o', color='w', label=COLOR_DESCRIPTIONS[i], markerfacecolor=COLORS[i],
+                   markersize=10) for i in COLORS.keys() if i != 0]
+    ax.legend(handles=legend_elements, loc='upper right')
+
+    # set the x and y axis labels
     label_x_use = root_file_name_sans_dir(label_x)
     label_y_use = root_file_name_sans_dir(label_y)
 
@@ -120,12 +133,12 @@ def dot_fasta_vs_fasta(reference_seq_file, compSeq, k, output, marker_size):
     print("length of ref seq: ", len(seq_ref))
     print("length of comp seq: ", len(seq_comp))
     dp = dotplot(seq_ref, seq_comp, k)
-    dotplot2Graphics(dp, reference_seq_file, compSeq,
-                     root_file_name_sans_dir(reference_seq_file) + " vs " + root_file_name_sans_dir(compSeq),
-                     output + ".k." + str(k) + ".png", marker_size)
+    plot_dot(dp, reference_seq_file, compSeq,
+             root_file_name_sans_dir(reference_seq_file) + " vs " + root_file_name_sans_dir(compSeq) + "\nk=" + str(k),
+             output + ".k." + str(k) + ".png", marker_size)
 
 
-def dot_read(reference_seq_file, read, k, marker_size):
+def dot_read(reference_seq_file, read, k):
     if not use_read(read):
         print("skipping read ", read.query_name, " because it is not primary alignment or has hard clipping")
         return None
@@ -137,7 +150,7 @@ def dot_read(reference_seq_file, read, k, marker_size):
     print("length of read: ", len(read.seq))
     print("length of ref: ", len(reference_seq))
 
-    return dotplot(reference_seq, read.seq, k, marker_size)
+    return dotplot(reference_seq, read.seq, k)
 
 
 def main():
@@ -167,9 +180,9 @@ def main():
             print("skipping read ", read.query_name, " because it is not primary alignment or has hard clipping")
             continue
         dp = dot_read(args.reference_seq, read, args.k)
-        dotplot2Graphics(dp, args.reference_seq, read.query_name,
-                         read.query_name + " vs " + root_file_name_sans_dir(args.reference_seq),
-                         get_png_file_for_read(read, args.k, args.output), args.marker_size)
+        plot_dot(dp, args.reference_seq, read.query_name,
+                 read.query_name + " vs " + root_file_name_sans_dir(args.reference_seq) + "\nk=" + str(args.k),
+                 get_png_file_for_read(read, args.k, args.output), args.marker_size)
 
 
 if __name__ == "__main__":
