@@ -137,10 +137,32 @@ def dot_read(reference_seq_file, read, k):
 
     return dotplot(reference_seq, read.seq, k)
 
+
+def get_base_alignment(read):
+    #dictionary with chr:start-end as key and cigar string as value
+    alignments = {}
+    cr = cigar.Cigar(read.cigarstring)
+    region = read.reference_name + ":" + str(read.reference_start) + "-" + str(read.reference_end)
+    alignments[region] = read.cigarstring
+    return alignments
+
+def parse_SA_tag(tag):
+    sa = tag.split(",")
+    chr = sa[0]
+    start = int(sa[1])
+    end = start + len(read.seq)
+    region = chr + ":" + str(start) + "-" + str(end)
+    cigar = sa[3]
+    return region, cigar
 def get_all_alignments(read):
     # store a string of chr:start-end for each alignment and the cigar string associated with it
-    alignments = []
-    # base=read.
+    alignments=get_base_alignment(read)
+    for tag in read.tags:
+        if tag[0] == "SA":
+            region, cigar = parse_SA_tag(tag[1])
+            alignments[region] = cigar
+    return alignments
+
 def add_cigar_to_fig(ax, read):
     cr = cigar.Cigar(read.cigarstring)
     x = 0
