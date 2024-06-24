@@ -7,5 +7,5 @@
 ![](./examples/dot.cigar.png)
 
 ## Dotplot of a long read sequence, displaying primary + 2 SA algnments 
-![](./dot.SA.png)
+![](./examples/dot.SA.png)
 
