@@ -153,23 +153,31 @@ def get_base_alignment(read):
     return [read.reference_name, read.reference_start, read.reference_end, cr]
 
 def parse_SA_tag(tag):
-    sa = tag.split(",")
-    chr = sa[0]
-    start = int(sa[1])
-    end = int(sa[2])
-    region = chr + ":" + str(start) + "-" + str(end)
-    cigarS = cigar.Cigar(sa[3])
-    # return a list of chr, start, end, and cigar string
-    return [chr, start, end, cigarS]
-    # return region, cigarS
+    print(tag)
+    sa_all=tag.split(";")
+    sas = []
+    for sa in sa_all:
+        if sa == "":
+            continue
+        split_sa = sa.split(",")
+        print(split_sa)
+        chr = split_sa[0]
+        start = int(split_sa[1])
+        cigarS = cigar.Cigar(split_sa[3])
+        end = start + cigarS.reference_length()
+        sas.append([chr, start, end, cigarS])
+    return sas
 
 
 def get_all_alignments(read):
     # store a string of chr:start-end for each alignment and the cigar string associated with it
-    alignments = [get_base_alignment(read)]
+    alignments = []
+    alignments.append(get_base_alignment(read))
     for tag in read.tags:
         if tag[0] == "SA":
-            alignments.append(parse_SA_tag(tag[1]))
+            sas = parse_SA_tag(tag[1])
+            for sa in sas:
+                alignments.append(sa)
     return alignments
 
 
@@ -209,8 +217,12 @@ def add_cigar_to_fig(ax, read, min_indel, ref_loc):
     # draw a vertical line at the old xmin
     ax.axvline(x=xmin, color='black', linestyle='solid')
     alignment_number = 0
+    print("alignments: ", alignments)
     for alignment in alignments:
         alignment_x=rect_x + per_alignment_width * alignment_number
+        alignment_number += 1
+        print("alignment: ", alignment)
+        print("ref_loc: ", ref_loc)
         same_chr = ref_loc[0] == alignment[0]
         read_index = 0
         ref_index =0-(ref_loc[1]-alignment[1])
@@ -248,7 +260,7 @@ def add_cigar_to_fig(ax, read, min_indel, ref_loc):
                 print("unknown cigar: ", c)
     #add a color legend for the CIGAR colors
     groups=collapse_cigar_colors()
-    keys= groups.keys().sort()
+    keys= groups.keys()
     legend_elements = [
         plt.Line2D([0], [0], marker='o', color='w', label=groups[i], markerfacecolor=i,
                    markersize=10) for i in keys]
@@ -301,6 +313,7 @@ def process_bam(args):
         save_plot(ax, get_png_file_for_read(read, args.k, args.output))
         ax = add_cigar_to_fig(ax, read, args.min_indel, get_ref_loc_from_label(root_file_name_sans_dir(args.reference_seq)))
         save_plot(ax, get_png_file_for_read(read, args.k, args.output, cigar=True))
+        plt.close()
 
 
 if __name__ == "__main__":
