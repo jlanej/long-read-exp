@@ -264,7 +264,7 @@ def add_cigar_to_fig(ax, read, min_indel, ref_loc):
             elif c[1] in ["H", "S"]:
                 ax.add_patch(
                     plt.Rectangle((alignment_x, read_index), per_alignment_width, c[0], fill=True,
-                                  color=CIGAR_COLORS[c[1]], alpha=0.1,
+                                  color=CIGAR_COLORS[c[1]], alpha=0.25,
                                   edgecolor=None))
                 read_index += c[0]
             elif c[1] in ["D"]:
@@ -354,7 +354,7 @@ def process_bam(args):
         fig, ax = plt.subplots()
         fig.tight_layout()
         plt.rcParams.update({'font.size': 22})
-        ax = plot_dot(dp, ax, args.reference_seq, read.query_name,
+        ax = plot_dot(dp, ax, args.reference_seq, "read sequence index",
                       read.query_name + " vs " + root_file_name_sans_dir(args.reference_seq) + "\nk=" + str(args.k),
                       args.marker_size)
         save_plot(ax, get_png_file_for_read(read, args.k, args.output))
