@@ -5,3 +5,7 @@
 
 ## Dotplot of a long read sequence, with cigar based coloring
 ![](./examples/dot.cigar.png)
+
+## Dotplot of a long read sequence, displaying primary + 2 SA algnments 
+![](./dot.SA.png)
+
