@@ -12,11 +12,23 @@ from matplotlib.legend import Legend
 #             -  1: k1 == k2, and ReverseComplement(k1) != k2
 #             - -1: k1 != k2, and ReverseComplement(k1) == k2
 #             -  0: k1 != k2, and ReverseComplement(k1) != k2
-COLORS = {
+DOT_COLORS = {
     2: ["black", "palindrome"],
     1: ["green", "forward match"],
     -1: ["red", "reverse complement match"],
     0: ["white", "no match"]
+}
+
+
+CIGAR_COLORS = {
+    "M": "green",
+    "I": "blue",
+    "D": "red",
+    "S": "gray",
+    "H": "gray",
+    "P": "gray",
+    "=": "green",
+    "X": "green"
 }
 
 
@@ -52,17 +64,17 @@ def plot_dot(dpo, ax, label_x, label_y, heading, marker_size):
     # create a new figure
     dp = dpo.mat
     # loop over the possible values in the matrix and plot them
-    for i in COLORS.keys():
+    for i in DOT_COLORS.keys():
         # skip 0
         if i == 0:
             continue
         subset = get_sparse_subset_by_value(dpo, i)
-        ax.spy(subset, marker='.', markersize=marker_size, color=COLORS[i][0], origin='lower', alpha=0.5)
+        ax.spy(subset, marker='.', markersize=marker_size, color=DOT_COLORS[i][0], origin='lower', alpha=0.5)
 
     # Add a legend describing the colors
     legend_elements = [
-        plt.Line2D([0], [0], marker='o', color='w', label=COLORS[i][1], markerfacecolor=COLORS[i][0],
-                   markersize=10) for i in COLORS.keys() if i != 0]
+        plt.Line2D([0], [0], marker='o', color='w', label=DOT_COLORS[i][1], markerfacecolor=DOT_COLORS[i][0],
+                   markersize=10) for i in DOT_COLORS.keys() if i != 0]
     ax.legend(handles=legend_elements, loc='upper right', title="Dot colors")
 
     # set the x and y-axis labels
@@ -153,14 +165,12 @@ def get_base_alignment(read):
     return [read.reference_name, read.reference_start, read.reference_end, cr]
 
 def parse_SA_tag(tag):
-    print(tag)
     sa_all=tag.split(";")
     sas = []
     for sa in sa_all:
         if sa == "":
             continue
         split_sa = sa.split(",")
-        print(split_sa)
         chr = split_sa[0]
         start = int(split_sa[1])
         cigarS = cigar.Cigar(split_sa[3])
@@ -178,19 +188,22 @@ def get_all_alignments(read):
             sas = parse_SA_tag(tag[1])
             for sa in sas:
                 alignments.append(sa)
+    alignments = sort_alignments_by_left_clip(alignments)
     return alignments
 
 
-CIGAR_COLORS = {
-    "M": "green",
-    "I": "blue",
-    "D": "red",
-    "S": "gray",
-    "H": "gray",
-    "P": "gray",
-    "=": "green",
-    "X": "green"
-}
+def get_amount_of_left_soft_hard_clipping(read):
+    left_clip = 0
+    cr = cigar.Cigar(read.cigarstring)
+    for c in cr.items():
+        if c[1] in ["H", "S"]:
+            left_clip += c[0]
+        else:
+            break
+    return left_clip
+def sort_alignments_by_left_clip(alignments):
+    return sorted(alignments, key=lambda x: get_amount_of_left_soft_hard_clipping(x))
+
 # "N": "white",
 
 def collapse_cigar_colors():
@@ -204,6 +217,8 @@ def collapse_cigar_colors():
         color_groups[c[1]] += c[0]
     return color_groups
 
+def get_label_for_alignment(alignment,number):
+    return alignment[0] + ":" + str(alignment[1]) + "-" + str(alignment[2]) + " (#" + str(number) + ")"
 def add_cigar_to_fig(ax, read, min_indel, ref_loc):
     alignments = get_all_alignments(read)
     xmin, xmax = ax.get_xlim()
@@ -217,12 +232,15 @@ def add_cigar_to_fig(ax, read, min_indel, ref_loc):
     # draw a vertical line at the old xmin
     ax.axvline(x=xmin, color='black', linestyle='solid')
     alignment_number = 0
-    print("alignments: ", alignments)
+
+    labels_to_add = []
+    ticks_to_add = []
     for alignment in alignments:
         alignment_x=rect_x + per_alignment_width * alignment_number
+        ax.axvline(x=alignment_x + per_alignment_width, color='black', linestyle='dashed')
         alignment_number += 1
-        print("alignment: ", alignment)
-        print("ref_loc: ", ref_loc)
+        labels_to_add.append(get_label_for_alignment(alignment,alignment_number))
+        ticks_to_add.append(alignment_x+ per_alignment_width/2)
         same_chr = ref_loc[0] == alignment[0]
         read_index = 0
         ref_index =0-(ref_loc[1]-alignment[1])
@@ -267,6 +285,22 @@ def add_cigar_to_fig(ax, read, min_indel, ref_loc):
     labels = [groups[i] for i in keys]
     leg=Legend(ax, legend_elements, loc='lower right', title="CIGAR colors",labels=labels)
     ax.add_artist(leg)
+    current_labels = ax.get_xticklabels()
+    current_ticks = ax.get_xticks()
+    # add the new x ticks at the beginning of the list
+    ax.set_xticks(np.append(ticks_to_add, current_ticks))
+    ax.set_xticklabels(np.append(labels_to_add, current_labels))
+    # rotate the labels, but only the new ones
+    # ax.set_xticklabels(current_labels, rotation=45, ha='right')
+    # loop over the ticks and rotate the new ones
+    for tick in ax.get_xticklabels():
+        if tick.get_text() in labels_to_add:
+            tick.set_rotation(45)
+            tick.set_ha('right')
+        else:
+            tick.set_rotation(-45)
+            tick.set_ha('left')
+    # plt.xticks(rotation=45, ha='right')
     return ax
 
 
