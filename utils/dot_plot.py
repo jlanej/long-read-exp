@@ -337,6 +337,7 @@ def main():
         dot_fasta_vs_fasta(args.reference_seq, args.compSeq, args.k, args.output, args.marker_size)
         return
     elif args.bam:
+        dot_fasta_vs_fasta(args.reference_seq, args.reference_seq, args.k, args.output+".ref_v_ref", args.marker_size)
         process_bam(args)
         return
     else:
