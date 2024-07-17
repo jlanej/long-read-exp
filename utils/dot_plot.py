@@ -5,7 +5,7 @@ import pysam
 import cigar
 import wotplot
 from matplotlib.legend import Legend
-
+import lr_utils
 # https://github.com/fedarko/wotplot/blob/a61953c504bea7167cc06a29529d269fec09a9c6/wotplot/_matrix.py#L73C1-L77C60
 #
 #             -  2: k1 == k2, and ReverseComplement(k1) == k2
@@ -32,7 +32,7 @@ CIGAR_COLORS = {
 
 
 def dotplot(seq1, seq2, w):
-    return wotplot.DotPlotMatrix(seq1, seq2, w, binary=False, yorder="TB")
+    return wotplot.DotPlotMatrix(seq1, seq2, w, binary=False, yorder="TB", verbose=True)
 
 
 def root_file_name_sans_dir(file_name):
@@ -54,7 +54,7 @@ def get_chr_from_label(label):
 
 def get_ref_loc_from_label(label):
     if not label.split("_")[0].startswith("chr"):
-        return None
+        return [None, None, None]
     return [label.split("_")[0], int(label.split("_")[1]), int(label.split("_")[2])]
 
 
@@ -252,7 +252,9 @@ def add_cigar_to_fig(ax, read, min_indel, ref_loc):
         ticks_to_add.append(alignment_x + per_alignment_width / 2)
         same_chr = ref_loc[0] == alignment[0]
         read_index = 0
-        ref_index = 0 - (ref_loc[1] - alignment[1])
+        ref_index = 0
+        if not ref_loc[1] ==None:
+            ref_index = 0 - (ref_loc[1] - alignment[1])
         for c in alignment[3].items():
             if c[1] in ["M", "X", "="]:
                 ax.add_patch(
@@ -324,7 +326,7 @@ def main():
     parser.add_argument("--reference_seq", help="the filename of reference in FASTA format")
     parser.add_argument("--compSeq", help="the filename of a second sequence in FASTA format")
     parser.add_argument("--output", help="the root output filename for the dotplot")
-    parser.add_argument("--marker_size", type=int, default=4, help="the size of the markers in the dotplot")
+    parser.add_argument("--marker_size", type=int, default=1, help="the size of the markers in the dotplot")
     parser.add_argument("--min_indel", type=int, default=10, help="minimum indel size to show in dotplot")
     args = parser.parse_args()
 
