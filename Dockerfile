@@ -29,5 +29,7 @@ COPY . /app
 WORKDIR /app
 
 RUN python3.9 main.py -h
+RUN python3.9 /utils/dot_plot.py -h
+
 # run the project
 CMD ["python3.9", "main.py"]
