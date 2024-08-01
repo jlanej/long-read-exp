@@ -73,12 +73,6 @@ def plot_dot(dpo, ax, label_x, label_y, heading, marker_size):
         subset = get_sparse_subset_by_value(dpo, i)
         ax.spy(subset, marker='.', markersize=marker_size, color=DOT_COLORS[i][0], origin='lower', alpha=0.5)
 
-    # Add a legend describing the colors
-    legend_elements = [
-        plt.Line2D([0], [0], marker='o', color='w', label=DOT_COLORS[i][1], markerfacecolor=DOT_COLORS[i][0],
-                   markersize=10) for i in DOT_COLORS.keys() if i != 0]
-    ax.legend(handles=legend_elements, loc='upper right', title="Dot colors")
-
     # set the x and y-axis labels
     label_x_use = root_file_name_sans_dir(label_x)
     label_y_use = root_file_name_sans_dir(label_y)
@@ -128,7 +122,7 @@ def use_read(read):
     return not has_hard_clipping(read)
 
 
-def dot_fasta_vs_fasta(reference_seq_file, compSeq, k, output, marker_size):
+def dot_fasta_vs_fasta(reference_seq_file, compSeq, k, output, marker_size, create_legend_plot=False):
     with open(reference_seq_file) as fileA:
         seq_ref = "".join([line.strip() for line in fileA if not line.startswith(">")])
     seq_ref = seq_ref.upper()
@@ -145,6 +139,17 @@ def dot_fasta_vs_fasta(reference_seq_file, compSeq, k, output, marker_size):
                   root_file_name_sans_dir(reference_seq_file) + " vs " + root_file_name_sans_dir(
                       compSeq) + "\nk=" + str(k), marker_size)
     save_plot(ax, output + ".k." + str(k) + ".png")
+    if create_legend_plot:
+        # Add a legend describing the colors
+        add_legend(ax)
+        save_plot(ax, output + ".k." + str(k) + ".legend.png")
+
+
+def add_legend(ax):
+    legend_elements = [
+        plt.Line2D([0], [0], marker='o', color='w', label=DOT_COLORS[i][1], markerfacecolor=DOT_COLORS[i][0],
+                   markersize=10) for i in DOT_COLORS.keys() if i != 0]
+    ax.legend(handles=legend_elements, loc='upper left', title="Dot colors", bbox_to_anchor=(0.25, -0.1))
 
 
 def dot_read(reference_seq_file, read, k):
@@ -290,15 +295,7 @@ def add_cigar_to_fig(ax, read, min_indel, ref_loc):
                 read_index += c[0]
             else:
                 print("unknown cigar: ", c)
-    #add a color legend for the CIGAR colors
-    groups = collapse_cigar_colors()
-    keys = groups.keys()
-    legend_elements = [
-        plt.Line2D([0], [0], marker='o', color='w', label=groups[i], markerfacecolor=i,
-                   markersize=10) for i in keys]
-    labels = [groups[i] for i in keys]
-    leg = Legend(ax, legend_elements, loc='lower right', title="CIGAR colors", labels=labels)
-    ax.add_artist(leg)
+
     current_labels = ax.get_xticklabels()
     current_ticks = ax.get_xticks()
     # add the new x ticks at the beginning of the list
@@ -326,7 +323,7 @@ def main():
     parser.add_argument("--reference_seq", help="the filename of reference in FASTA format")
     parser.add_argument("--compSeq", help="the filename of a second sequence in FASTA format")
     parser.add_argument("--output", help="the root output filename for the dotplot")
-    parser.add_argument("--marker_size", type=int, default=1, help="the size of the markers in the dotplot")
+    parser.add_argument("--marker_size", type=float, default=1, help="the size of the markers in the dotplot")
     parser.add_argument("--min_indel", type=int, default=10, help="minimum indel size to show in dotplot")
     args = parser.parse_args()
 
@@ -347,7 +344,7 @@ def main():
         return
 
 
-def process_bam(args):
+def process_bam(args,create_legend_plot=False):
     a = pysam.AlignmentFile(args.bam, "rb")
     for read in a:
         if has_hard_clipping(read):
@@ -363,7 +360,22 @@ def process_bam(args):
         save_plot(ax, get_png_file_for_read(read, args.k, args.output))
         ax = add_cigar_to_fig(ax, read, args.min_indel,
                               get_ref_loc_from_label(root_file_name_sans_dir(args.reference_seq)))
+
         save_plot(ax, get_png_file_for_read(read, args.k, args.output, cigar=True))
+
+        if create_legend_plot:
+            add_legend(ax)
+            # add a color legend for the CIGAR colors
+            groups = collapse_cigar_colors()
+            keys = groups.keys()
+            legend_elements = [
+                plt.Line2D([0], [0], marker='o', color='w', label=groups[i], markerfacecolor=i,
+                           markersize=10) for i in keys]
+            labels = [groups[i] for i in keys]
+            leg = Legend(ax, legend_elements, loc='upper right', title="CIGAR colors", labels=labels,
+                         bbox_to_anchor=(0.75, -0.1))
+            ax.add_artist(leg)
+            save_plot(ax, get_png_file_for_read(read, args.k, args.output, cigar=True).replace(".png", ".legend.png"))
         plt.close()
 
 
