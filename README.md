@@ -9,3 +9,6 @@
 ## Dotplot of a long read sequence, displaying primary + 2 SA alignments 
 ![](./examples/dot.SA.png)
 
+
+## Dotplot of t2t chrY against itself, itertating from k=5000 to k=400
+![](./examples/chrY.k.iter.gif)
