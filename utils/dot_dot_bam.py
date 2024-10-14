@@ -6,14 +6,6 @@ import cigar
 import wotplot
 from matplotlib.legend import Legend
 from pyfaidx import Fasta
-
-import lr_utils
-# https://github.com/fedarko/wotplot/blob/a61953c504bea7167cc06a29529d269fec09a9c6/wotplot/_matrix.py#L73C1-L77C60
-#
-#             -  2: k1 == k2, and ReverseComplement(k1) == k2
-#             -  1: k1 == k2, and ReverseComplement(k1) != k2
-#             - -1: k1 != k2, and ReverseComplement(k1) == k2
-#             -  0: k1 != k2, and ReverseComplement(k1) != k2
 DOT_COLORS = {
     2: ["black", "palindrome"],
     1: ["green", "forward match"],
@@ -36,23 +28,11 @@ CIGAR_COLORS = {
 def dotplot(seq1, seq2, w):
     return wotplot.DotPlotMatrix(seq1, seq2, w, binary=False, yorder="TB", verbose=True)
 
-
 def root_file_name_sans_dir(file_name):
     return file_name.split("/")[-1].split(".")[0]
 
-
-def get_start_index_from_label(label):
-    #     if the first _ delimited entry does not start with chr, return 0
-    if not label.split("_")[0].startswith("chr"):
-        return 0
-    return int(label.split("_")[1])
-
-
-def get_chr_from_label(label):
-    if not label.split("_")[0].startswith("chr"):
-        return None
-    return label.split("_")[0]
-
+def get_file_name_from_ucsc_region(region):
+    return region.replace(":", "_").replace("-", "_")
 
 def get_ref_loc_from_label(label):
     if not label.split("_")[0].startswith("chr"):
@@ -64,7 +44,7 @@ def get_sparse_subset_by_value(matrix, value):
     return matrix.mat == value
 
 
-def plot_dot(dpo, ax, label_x, label_y, heading, marker_size):
+def plot_dot(dpo, ax, label_x, label_y,start_x,start_y, heading, marker_size):
     # create a new figure
     dp = dpo.mat
     # loop over the possible values in the matrix and plot them
@@ -76,19 +56,18 @@ def plot_dot(dpo, ax, label_x, label_y, heading, marker_size):
         ax.spy(subset, marker='.', markersize=marker_size, color=DOT_COLORS[i][0], origin='lower', alpha=0.5)
 
     # set the x and y-axis labels
-    label_x_use = root_file_name_sans_dir(label_x)
-    label_y_use = root_file_name_sans_dir(label_y)
+    label_x_use = label_x
+    label_y_use = label_y
 
     # determine labelEvery to have 10 labels on the x axis
     label_every = dp.shape[1] // 10
     ax.set_xticks(np.arange(0, dp.shape[1], label_every))
-    start_x = get_start_index_from_label(label_x_use)
+
     ax.set_xticklabels(np.arange(start_x, start_x + dp.shape[1], label_every))
     #
     # # determine labelEvery to have 10 labels on the y axis
     label_every = dp.shape[0] // 10
     ax.set_yticks(np.arange(0, dp.shape[0], label_every))
-    start_y = get_start_index_from_label(label_y_use)
     ax.set_yticklabels(np.arange(start_y, start_y + dp.shape[0], label_every))
 
     # set the labels and title
@@ -122,40 +101,6 @@ def has_hard_clipping(read):
 
 def use_read(read):
     return not has_hard_clipping(read)
-
-# extract the sequence defined by the ucsc region from the fasta file, similar to samtools faidx using pyfaidx
-def get_sequence_from_fasta(fasta_file, region):
-    f = Fasta(fasta_file)
-    return str(f[region])
-
-
-
-def dot_reference_region(reference_seq_file, region, k, output, marker_size, create_legend_plot=False):
-#     extract the region from the reference genome
-    seq_ref = get_sequence_from_fasta(reference_seq_file, region)
-
-def dot_fasta_vs_fasta(reference_seq_file, compSeq, k, output, marker_size, create_legend_plot=False):
-    with open(reference_seq_file) as fileA:
-        seq_ref = "".join([line.strip() for line in fileA if not line.startswith(">")])
-    seq_ref = seq_ref.upper()
-    with open(compSeq) as fileB:
-        seq_comp = "".join([line.strip() for line in fileB if not line.startswith(">")])
-    seq_comp = seq_comp.upper()
-
-    print("length of ref seq: ", len(seq_ref))
-    print("length of comp seq: ", len(seq_comp))
-    dp = dotplot(seq_ref, seq_comp, k)
-    fig, ax = plt.subplots()
-
-    ax = plot_dot(dp, ax, reference_seq_file, compSeq,
-                  root_file_name_sans_dir(reference_seq_file) + " vs " + root_file_name_sans_dir(
-                      compSeq) + "\nk=" + str(k), marker_size)
-    save_plot(ax, output + ".k." + str(k) + ".png")
-    if create_legend_plot:
-        # Add a legend describing the colors
-        add_legend(ax)
-        save_plot(ax, output + ".k." + str(k) + ".legend.png")
-
 
 def add_legend(ax):
     legend_elements = [
@@ -327,6 +272,43 @@ def add_cigar_to_fig(ax, read, min_indel, ref_loc):
     return ax
 
 
+def parse_ucssc_region(region):
+    region_split = region.split(":")
+    chr = region_split[0]
+    start_end = region_split[1].split("-")
+    start = int(start_end[0])
+    end = int(start_end[1])
+    return [chr, start, end]
+
+# extract the sequence defined by the ucsc region from the fasta file, similar to samtools faidx using pyfaidx
+def get_sequence_from_fasta(fasta_file, ucsc_region):
+    f = Fasta(fasta_file)
+    return f[ucsc_region[0]][ucsc_region[1]-1:ucsc_region[2]]
+
+
+
+def dot_reference_region(reference_seq_file, region, k, output, marker_size, create_legend_plot=False):
+    seq_ref = get_sequence_from_fasta(reference_seq_file, region)
+
+def dot_ref_vs_ref(reference_seq_file, region, k, output, marker_size, create_legend_plot=False):
+    ucsc_region=parse_ucsc_region(region)
+    ref_seq = get_sequence_from_fasta(reference_seq_file, ucsc_region)
+    print("extracted reference sequence: ", ref_seq.fancy_name, " from ", reference_seq_file)
+    print("length of ref seq: ", len(ref_seq))
+    ref_seq = str(ref_seq).upper()
+    dp = dotplot(ref_seq, ref_seq, k)
+    fig, ax = plt.subplots()
+
+    ax = plot_dot(dp, ax, region, region,ucsc_region[1],ucsc_region[1],
+                  get_file_name_from_ucsc_region(region) + " vs " +get_file_name_from_ucsc_region(region) + "\nk=" + str(k), marker_size)
+    save_plot(ax, output + ".k." + str(k) + ".png")
+    if create_legend_plot:
+        # Add a legend describing the colors
+        add_legend(ax)
+        save_plot(ax, output + ".k." + str(k) + ".legend.png")
+
+
+
 def main():
     # Define the command line arguments
     parser = argparse.ArgumentParser(description="Generate a dotplot from two sequences in FASTA format.")
@@ -335,11 +317,12 @@ def main():
     parser.add_argument("--reference_genome", help="the reference genome in FASTA format")
     parser.add_argument("--reference_region", help="the reference region in the reference genome")
     parser.add_argument("--bam_region", help="the region in the bam file to plot")
+    parser.add_argument("--output", help="the root output filename for the dotplot")
     parser.add_argument("--marker_size", type=float, default=1, help="the size of the markers in the dotplot")
     parser.add_argument("--min_indel", type=int, default=10, help="minimum indel size to show in dotplot")
     args = parser.parse_args()
-    dot_fasta_vs_fasta(args.reference_seq, args.reference_seq, args.k, args.output + ".ref_v_ref", args.marker_size)
-    process_bam(args)
+    dot_ref_vs_ref(args.reference_genome, args.reference_region, args.k, args.output + ".ref_v_ref", args.marker_size)
+    # process_bam(args)
 
 
 def process_bam(args,create_legend_plot=False):
