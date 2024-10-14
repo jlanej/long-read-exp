@@ -6,6 +6,7 @@ import cigar
 import wotplot
 from matplotlib.legend import Legend
 from pyfaidx import Fasta
+
 DOT_COLORS = {
     2: ["black", "palindrome"],
     1: ["green", "forward match"],
@@ -28,11 +29,14 @@ CIGAR_COLORS = {
 def dotplot(seq1, seq2, w):
     return wotplot.DotPlotMatrix(seq1, seq2, w, binary=False, yorder="TB", verbose=True)
 
+
 def root_file_name_sans_dir(file_name):
     return file_name.split("/")[-1].split(".")[0]
 
+
 def get_file_name_from_ucsc_region(region):
     return region.replace(":", "_").replace("-", "_")
+
 
 def get_ref_loc_from_label(label):
     if not label.split("_")[0].startswith("chr"):
@@ -44,7 +48,7 @@ def get_sparse_subset_by_value(matrix, value):
     return matrix.mat == value
 
 
-def plot_dot(dpo, ax, label_x, label_y,start_x,start_y, heading, marker_size):
+def plot_dot(dpo, ax, label_x, label_y, start_x, start_y, heading, marker_size):
     # create a new figure
     dp = dpo.mat
     # loop over the possible values in the matrix and plot them
@@ -101,6 +105,7 @@ def has_hard_clipping(read):
 
 def use_read(read):
     return not has_hard_clipping(read)
+
 
 def add_legend(ax):
     legend_elements = [
@@ -167,6 +172,7 @@ def get_amount_of_left_soft_hard_clipping(alignment):
 def sort_alignments_by_left_clip(alignments):
     return sorted(alignments, key=lambda x: get_amount_of_left_soft_hard_clipping(x))
 
+
 def collapse_cigar_colors():
     #     group CIGAR_COLORS that are the same color
     color_groups = {}
@@ -208,7 +214,7 @@ def add_cigar_to_fig(ax, read, min_indel, ref_loc):
         same_chr = ref_loc[0] == alignment[0]
         read_index = 0
         ref_index = 0
-        if not ref_loc[1] ==None:
+        if not ref_loc[1] == None:
             ref_index = 0 - (ref_loc[1] - alignment[1])
         for c in alignment[3].items():
             if c[1] in ["M", "X", "="]:
@@ -273,18 +279,21 @@ def parse_ucsc_region(region):
     end = int(start_end[1])
     return [chr, start, end]
 
+
 # extract the sequence defined by the ucsc region from the fasta file, similar to samtools faidx using pyfaidx
 def get_sequence_from_fasta(fasta_file, ucsc_region):
     f = Fasta(fasta_file)
-    return f[ucsc_region[0]][ucsc_region[1]-1:ucsc_region[2]]
+    return f[ucsc_region[0]][ucsc_region[1] - 1:ucsc_region[2]]
+
 
 def dot_ref_vs_ref(reference_seq_file, region, k, output, marker_size, create_legend_plot=False):
     ref_seq, ucsc_region = parse_ref(reference_seq_file, region)
     dp = dotplot(ref_seq, ref_seq, k)
     fig, ax = plt.subplots()
 
-    ax = plot_dot(dp, ax, region, region,ucsc_region[1],ucsc_region[1],
-                  get_file_name_from_ucsc_region(region) + " vs " +get_file_name_from_ucsc_region(region) + "\nk=" + str(k), marker_size)
+    ax = plot_dot(dp, ax, region, region, ucsc_region[1], ucsc_region[1],
+                  get_file_name_from_ucsc_region(region) + " vs " + get_file_name_from_ucsc_region(
+                      region) + "\nk=" + str(k), marker_size)
     save_plot(ax, output + ".k." + str(k) + ".png")
     if create_legend_plot:
         # Add a legend describing the colors
@@ -313,32 +322,34 @@ def main():
     parser.add_argument("--marker_size", type=float, default=1, help="the size of the markers in the dotplot")
     parser.add_argument("--min_indel", type=int, default=10, help="minimum indel size to show in dotplot")
     args = parser.parse_args()
-    # dot_ref_vs_ref(args.reference_genome, args.reference_region, args.k, args.output + "."+get_file_name_from_ucsc_region(args.reference_region)+".ref_v_ref", args.marker_size)
-    process_bam(args)
+    dot_ref_vs_ref(args.reference_genome, args.reference_region, args.k, args.output + "."+get_file_name_from_ucsc_region(args.reference_region)+".ref_v_ref", args.marker_size)
+    process_bam(args.reference_genome, args.reference_region, args.bam, args.bam_region, args.k, args.marker_size, args.output, args.min_indel)
 
 
-def process_bam(args,create_legend_plot=False):
-    a = pysam.AlignmentFile(args.bam, "rb")
-    ref_seq, ucsc_region = parse_ref(args.reference_genome, args.reference_region)
+def process_bam(reference_genome, reference_region, bam, bam_region, k, marker_size, output, min_indel,
+                create_legend_plot=False):
+    a = pysam.AlignmentFile(bam, "rb")
+    ref_seq, ucsc_region = parse_ref(reference_genome, reference_region)
     # query the region
-    if args.bam_region:
+    if bam_region:
         a = a.fetch(contig=ucsc_region[0], start=ucsc_region[1], end=ucsc_region[2])
     for read in a:
         if has_hard_clipping(read):
             print("skipping read ", read.query_name, " because it has hard clipping")
             continue
-        dp = dot_read(ref_seq, read, args.k)
+        dp = dot_read(ref_seq, read, k)
         fig, ax = plt.subplots()
         fig.tight_layout()
         plt.rcParams.update({'font.size': 22})
-        ax = plot_dot(dp, ax, args.reference_region, "read sequence index",ucsc_region[1],0,
-                      read.query_name + " vs " + get_file_name_from_ucsc_region(args.reference_region) + "\nk=" + str(args.k),
-                      args.marker_size)
-        save_plot(ax, get_png_file_for_read(read, args.k, args.output))
-        ax = add_cigar_to_fig(ax, read, args.min_indel,
+        ax = plot_dot(dp, ax, reference_region, "read sequence index", ucsc_region[1], 0,
+                      read.query_name + " vs " + get_file_name_from_ucsc_region(args.reference_region) + "\nk=" + str(
+                          args.k),
+                      marker_size)
+        save_plot(ax, get_png_file_for_read(read, k, output))
+        ax = add_cigar_to_fig(ax, read, min_indel,
                               ucsc_region)
 
-        save_plot(ax, get_png_file_for_read(read, args.k, args.output, cigar=True))
+        save_plot(ax, get_png_file_for_read(read, k, output, cigar=True))
 
         if create_legend_plot:
             add_legend(ax)
@@ -352,7 +363,7 @@ def process_bam(args,create_legend_plot=False):
             leg = Legend(ax, legend_elements, loc='upper right', title="CIGAR colors", labels=labels,
                          bbox_to_anchor=(0.75, -0.1))
             ax.add_artist(leg)
-            save_plot(ax, get_png_file_for_read(read, args.k, args.output, cigar=True).replace(".png", ".legend.png"))
+            save_plot(ax, get_png_file_for_read(read, k, output, cigar=True).replace(".png", ".legend.png"))
         plt.close()
 
 
