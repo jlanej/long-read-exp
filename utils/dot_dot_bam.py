@@ -322,8 +322,11 @@ def main():
     parser.add_argument("--marker_size", type=float, default=1, help="the size of the markers in the dotplot")
     parser.add_argument("--min_indel", type=int, default=10, help="minimum indel size to show in dotplot")
     args = parser.parse_args()
-    dot_ref_vs_ref(args.reference_genome, args.reference_region, args.k, args.output + "."+get_file_name_from_ucsc_region(args.reference_region)+".ref_v_ref", args.marker_size)
-    process_bam(args.reference_genome, args.reference_region, args.bam, args.bam_region, args.k, args.marker_size, args.output, args.min_indel)
+    dot_ref_vs_ref(args.reference_genome, args.reference_region, args.k,
+                   args.output + "." + get_file_name_from_ucsc_region(args.reference_region) + ".ref_v_ref",
+                   args.marker_size)
+    process_bam(args.reference_genome, args.reference_region, args.bam, args.bam_region, args.k, args.marker_size,
+                args.output, args.min_indel)
 
 
 def process_bam(reference_genome, reference_region, bam, bam_region, k, marker_size, output, min_indel,
@@ -342,8 +345,8 @@ def process_bam(reference_genome, reference_region, bam, bam_region, k, marker_s
         fig.tight_layout()
         plt.rcParams.update({'font.size': 22})
         ax = plot_dot(dp, ax, reference_region, "read sequence index", ucsc_region[1], 0,
-                      read.query_name + " vs " + get_file_name_from_ucsc_region(args.reference_region) + "\nk=" + str(
-                          args.k),
+                      read.query_name + " vs " + get_file_name_from_ucsc_region(reference_region) + "\nk=" + str(
+                          k),
                       marker_size)
         save_plot(ax, get_png_file_for_read(read, k, output))
         ax = add_cigar_to_fig(ax, read, min_indel,
