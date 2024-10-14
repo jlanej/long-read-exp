@@ -64,7 +64,7 @@ def plot_dot(dpo, ax, label_x, label_y,start_x,start_y, heading, marker_size):
     ax.set_xticks(np.arange(0, dp.shape[1], label_every))
 
     ax.set_xticklabels(np.arange(start_x, start_x + dp.shape[1], label_every))
-    #
+
     # # determine labelEvery to have 10 labels on the y axis
     label_every = dp.shape[0] // 10
     ax.set_yticks(np.arange(0, dp.shape[0], label_every))
@@ -109,19 +109,15 @@ def add_legend(ax):
     ax.legend(handles=legend_elements, loc='upper left', title="Dot colors", bbox_to_anchor=(0.25, -0.1))
 
 
-def dot_read(reference_seq_file, read, k):
+def dot_read(ref_seq, read, k):
     if not use_read(read):
-        print("skipping read ", read.query_name, " because it is not primary alignment or has hard clipping")
+        print("skipping read ", read.query_name, " because it has hard clipping")
         return None
-    with open(reference_seq_file) as fileB:
-        reference_seq = "".join([line.strip() for line in fileB if not line.startswith(">")])
-    reference_seq = reference_seq.upper()
 
     print("read name: ", read.query_name)
     print("length of read: ", len(read.seq))
-    print("length of ref: ", len(reference_seq))
-
-    return dotplot(reference_seq, read.seq, k)
+    print("length of ref: ", len(ref_seq))
+    return dotplot(ref_seq, read.seq, k)
 
 
 def get_base_alignment(read):
@@ -170,9 +166,6 @@ def get_amount_of_left_soft_hard_clipping(alignment):
 
 def sort_alignments_by_left_clip(alignments):
     return sorted(alignments, key=lambda x: get_amount_of_left_soft_hard_clipping(x))
-
-
-# "N": "white",
 
 def collapse_cigar_colors():
     #     group CIGAR_COLORS that are the same color
@@ -272,7 +265,7 @@ def add_cigar_to_fig(ax, read, min_indel, ref_loc):
     return ax
 
 
-def parse_ucssc_region(region):
+def parse_ucsc_region(region):
     region_split = region.split(":")
     chr = region_split[0]
     start_end = region_split[1].split("-")
@@ -285,17 +278,8 @@ def get_sequence_from_fasta(fasta_file, ucsc_region):
     f = Fasta(fasta_file)
     return f[ucsc_region[0]][ucsc_region[1]-1:ucsc_region[2]]
 
-
-
-def dot_reference_region(reference_seq_file, region, k, output, marker_size, create_legend_plot=False):
-    seq_ref = get_sequence_from_fasta(reference_seq_file, region)
-
 def dot_ref_vs_ref(reference_seq_file, region, k, output, marker_size, create_legend_plot=False):
-    ucsc_region=parse_ucsc_region(region)
-    ref_seq = get_sequence_from_fasta(reference_seq_file, ucsc_region)
-    print("extracted reference sequence: ", ref_seq.fancy_name, " from ", reference_seq_file)
-    print("length of ref seq: ", len(ref_seq))
-    ref_seq = str(ref_seq).upper()
+    ref_seq, ucsc_region = parse_ref(reference_seq_file, region)
     dp = dotplot(ref_seq, ref_seq, k)
     fig, ax = plt.subplots()
 
@@ -307,6 +291,14 @@ def dot_ref_vs_ref(reference_seq_file, region, k, output, marker_size, create_le
         add_legend(ax)
         save_plot(ax, output + ".k." + str(k) + ".legend.png")
 
+
+def parse_ref(reference_seq_file, region):
+    ucsc_region = parse_ucsc_region(region)
+    ref_seq = get_sequence_from_fasta(reference_seq_file, ucsc_region)
+    print("extracted reference sequence: ", ref_seq.fancy_name, " from ", reference_seq_file)
+    print("length of ref seq: ", len(ref_seq))
+    ref_seq = str(ref_seq).upper()
+    return ref_seq, ucsc_region
 
 
 def main():
@@ -321,26 +313,30 @@ def main():
     parser.add_argument("--marker_size", type=float, default=1, help="the size of the markers in the dotplot")
     parser.add_argument("--min_indel", type=int, default=10, help="minimum indel size to show in dotplot")
     args = parser.parse_args()
-    dot_ref_vs_ref(args.reference_genome, args.reference_region, args.k, args.output + ".ref_v_ref", args.marker_size)
-    # process_bam(args)
+    # dot_ref_vs_ref(args.reference_genome, args.reference_region, args.k, args.output + "."+get_file_name_from_ucsc_region(args.reference_region)+".ref_v_ref", args.marker_size)
+    process_bam(args)
 
 
 def process_bam(args,create_legend_plot=False):
     a = pysam.AlignmentFile(args.bam, "rb")
+    ref_seq, ucsc_region = parse_ref(args.reference_genome, args.reference_region)
+    # query the region
+    if args.bam_region:
+        a = a.fetch(contig=ucsc_region[0], start=ucsc_region[1], end=ucsc_region[2])
     for read in a:
         if has_hard_clipping(read):
             print("skipping read ", read.query_name, " because it has hard clipping")
             continue
-        dp = dot_read(args.reference_seq, read, args.k)
+        dp = dot_read(ref_seq, read, args.k)
         fig, ax = plt.subplots()
         fig.tight_layout()
         plt.rcParams.update({'font.size': 22})
-        ax = plot_dot(dp, ax, args.reference_seq, "read sequence index",
-                      read.query_name + " vs " + root_file_name_sans_dir(args.reference_seq) + "\nk=" + str(args.k),
+        ax = plot_dot(dp, ax, args.reference_region, "read sequence index",ucsc_region[1],0,
+                      read.query_name + " vs " + get_file_name_from_ucsc_region(args.reference_region) + "\nk=" + str(args.k),
                       args.marker_size)
         save_plot(ax, get_png_file_for_read(read, args.k, args.output))
         ax = add_cigar_to_fig(ax, read, args.min_indel,
-                              get_ref_loc_from_label(root_file_name_sans_dir(args.reference_seq)))
+                              ucsc_region)
 
         save_plot(ax, get_png_file_for_read(read, args.k, args.output, cigar=True))
 
