@@ -345,7 +345,8 @@ def main():
                    args.marker_size, args.legend, args.facet)
     if args.bam:
         process_bam(args.reference_genome, args.reference_region, args.bam, args.bam_region, args.k, args.marker_size,
-                    args.output, args.min_indel, args.legend, args.facet)
+                    args.output + "." + get_file_name_from_ucsc_region(args.reference_region), args.min_indel,
+                    args.legend, args.facet)
 
 
 def process_bam(reference_genome, reference_region, bam, bam_region, k, marker_size, output, min_indel,
