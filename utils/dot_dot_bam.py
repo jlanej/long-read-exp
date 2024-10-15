@@ -48,16 +48,18 @@ def get_sparse_subset_by_value(matrix, value):
     return matrix.mat == value
 
 
-def plot_dot(dpo, ax, label_x, label_y, start_x, start_y, heading, marker_size,match_types=[1,-1,2]):
+def plot_dot(dpo, ax, label_x, label_y, start_x, start_y, heading, marker_size, alpha=0.5, match_types=None):
     # create a new figure
+    if match_types is None:
+        match_types = [1, -1, 2]
     dp = dpo.mat
     # loop over the possible values in the matrix and plot them
     for i in DOT_COLORS.keys():
         # skip 0
-        if i == 0:
+        if i == 0 or (match_types is not None and i not in match_types):
             continue
         subset = get_sparse_subset_by_value(dpo, i)
-        ax.spy(subset, marker='.', markersize=marker_size, color=DOT_COLORS[i][0], origin='lower', alpha=0.5)
+        ax.spy(subset, marker='.', markersize=marker_size, color=DOT_COLORS[i][0], origin='lower', alpha=alpha)
 
     # set the x and y-axis labels
     label_x_use = label_x
@@ -81,16 +83,16 @@ def plot_dot(dpo, ax, label_x, label_y, start_x, start_y, heading, marker_size,m
     return ax
 
 
-def save_plot(ax, filename):
+def save_plot(filename):
     plt.gcf().set_size_inches(25, 25)
     print("saving png file: ", filename)
     plt.savefig(filename, dpi=300, bbox_inches='tight')
 
 
-def get_png_file_for_read(read, k, output, cigar=False):
+def get_png_file_for_read(read, k, output, is_cigar=False):
     sanitized_read_name = read.query_name.replace("/", "_")
     output_read = output + "." + sanitized_read_name
-    cache_file = output_read + ".k." + str(k) + (".cigar" if cigar else "") + ".png"
+    cache_file = output_read + ".k." + str(k) + (".cigar" if is_cigar else "") + ".png"
     return cache_file
 
 
@@ -130,28 +132,27 @@ def get_base_alignment(read):
     return [read.reference_name, read.reference_start, read.reference_end, cr]
 
 
-def parse_SA_tag(tag):
+def parse_sa_tag(tag):
     sa_all = tag.split(";")
     sas = []
     for sa in sa_all:
         if sa == "":
             continue
         split_sa = sa.split(",")
-        chr = split_sa[0]
+        chrom = split_sa[0]
         start = int(split_sa[1])
-        cigarS = cigar.Cigar(split_sa[3])
-        end = start + cigarS.reference_length()
-        sas.append([chr, start, end, cigarS])
+        cigar_s = cigar.Cigar(split_sa[3])
+        end = start + cigar_s.reference_length()
+        sas.append([chrom, start, end, cigar_s])
     return sas
 
 
 def get_all_alignments(read):
     # store a string of chr:start-end for each alignment and the cigar string associated with it
-    alignments = []
-    alignments.append(get_base_alignment(read))
+    alignments = [get_base_alignment(read)]
     for tag in read.tags:
         if tag[0] == "SA":
-            sas = parse_SA_tag(tag[1])
+            sas = parse_sa_tag(tag[1])
             for sa in sas:
                 alignments.append(sa)
     alignments = sort_alignments_by_left_clip(alignments)
@@ -214,7 +215,7 @@ def add_cigar_to_fig(ax, read, min_indel, ref_loc):
         same_chr = ref_loc[0] == alignment[0]
         read_index = 0
         ref_index = 0
-        if not ref_loc[1] == None:
+        if not ref_loc[1] is None:
             ref_index = 0 - (ref_loc[1] - alignment[1])
         for c in alignment[3].items():
             if c[1] in ["M", "X", "="]:
@@ -273,11 +274,11 @@ def add_cigar_to_fig(ax, read, min_indel, ref_loc):
 
 def parse_ucsc_region(region):
     region_split = region.split(":")
-    chr = region_split[0]
+    chrom = region_split[0]
     start_end = region_split[1].split("-")
     start = int(start_end[0])
     end = int(start_end[1])
-    return [chr, start, end]
+    return [chrom, start, end]
 
 
 # extract the sequence defined by the ucsc region from the fasta file, similar to samtools faidx using pyfaidx
@@ -287,7 +288,7 @@ def get_sequence_from_fasta(fasta_file, ucsc_region):
 
 
 def dot_ref_vs_ref(reference_seq_file, region, k, output, marker_size, create_legend_plot=False,
-                   create_facet_plots=False):
+                   create_facet_plots=True):
     ref_seq, ucsc_region = parse_ref(reference_seq_file, region)
     dp = dotplot(ref_seq, ref_seq, k)
 
@@ -296,22 +297,22 @@ def dot_ref_vs_ref(reference_seq_file, region, k, output, marker_size, create_le
     ax = plot_dot(dp, ax, region, region, ucsc_region[1], ucsc_region[1],
                   get_file_name_from_ucsc_region(region) + " vs " + get_file_name_from_ucsc_region(
                       region) + "\nk=" + str(k), marker_size)
-    save_plot(ax, output + ".k." + str(k) + ".png")
+    save_plot(output + ".k." + str(k) + ".png")
     if create_legend_plot:
         # Add a legend describing the colors
         add_legend(ax)
-        save_plot(ax, output + ".k." + str(k) + ".legend.png")
+        save_plot(output + ".k." + str(k) + ".legend.png")
 
     if create_facet_plots:
         for match_type in DOT_COLORS.keys():
             if match_type == 0:
                 continue
             fig, ax = plt.subplots()
-            ax = plot_dot(dp, ax, region, region, ucsc_region[1], ucsc_region[1],
-                          get_file_name_from_ucsc_region(region) + " vs " + get_file_name_from_ucsc_region(
-                              region) + "\nk=" + str(k) + " " + DOT_COLORS[match_type][1], marker_size, match_types=[match_type])
-            save_plot(ax, output + ".k." + str(k) + "." + DOT_COLORS[match_type][1] + ".png")
-#         create a plot for each type of match, forward, reverse, and palindrome
+            plot_dot(dp, ax, region, region, ucsc_region[1], ucsc_region[1],
+                     get_file_name_from_ucsc_region(region) + " vs " + get_file_name_from_ucsc_region(
+                         region) + "\nk=" + str(k) + " " + DOT_COLORS[match_type][1], marker_size, 1,
+                     match_types=[match_type])
+            save_plot(output + ".k." + str(k) + "." + DOT_COLORS[match_type][1] + ".png")
 
 
 def parse_ref(reference_seq_file, region):
@@ -344,7 +345,7 @@ def main():
 
 
 def process_bam(reference_genome, reference_region, bam, bam_region, k, marker_size, output, min_indel,
-                create_legend_plot=False):
+                create_legend_plot=False, create_facet_plots=True):
     a = pysam.AlignmentFile(bam, "rb")
     ref_seq, ucsc_region = parse_ref(reference_genome, reference_region)
     # query the region
@@ -362,11 +363,11 @@ def process_bam(reference_genome, reference_region, bam, bam_region, k, marker_s
                       read.query_name + " vs " + get_file_name_from_ucsc_region(reference_region) + "\nk=" + str(
                           k),
                       marker_size)
-        save_plot(ax, get_png_file_for_read(read, k, output))
+        save_plot(get_png_file_for_read(read, k, output))
         ax = add_cigar_to_fig(ax, read, min_indel,
                               ucsc_region)
 
-        save_plot(ax, get_png_file_for_read(read, k, output, cigar=True))
+        save_plot(get_png_file_for_read(read, k, output, is_cigar=True))
 
         if create_legend_plot:
             add_legend(ax)
@@ -380,7 +381,18 @@ def process_bam(reference_genome, reference_region, bam, bam_region, k, marker_s
             leg = Legend(ax, legend_elements, loc='upper right', title="CIGAR colors", labels=labels,
                          bbox_to_anchor=(0.75, -0.1))
             ax.add_artist(leg)
-            save_plot(ax, get_png_file_for_read(read, k, output, cigar=True).replace(".png", ".legend.png"))
+            save_plot(get_png_file_for_read(read, k, output, is_cigar=True).replace(".png", ".legend.png"))
+        if create_facet_plots:
+            for match_type in DOT_COLORS.keys():
+                if match_type == 0:
+                    continue
+                fig, ax = plt.subplots()
+                plot_dot(dp, ax, reference_region, "read sequence index", ucsc_region[1], 0,
+                         read.query_name + " vs " + get_file_name_from_ucsc_region(reference_region) + "\nk=" + str(
+                             k) + " " + DOT_COLORS[match_type][1], marker_size, 1, match_types=[match_type])
+                save_plot(
+                    get_png_file_for_read(read, k, output).replace(".png", "." + DOT_COLORS[match_type][1] + ".png"))
+
         plt.close()
 
 
