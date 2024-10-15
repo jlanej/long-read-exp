@@ -287,8 +287,8 @@ def get_sequence_from_fasta(fasta_file, ucsc_region):
     return f[ucsc_region[0]][ucsc_region[1] - 1:ucsc_region[2]]
 
 
-def dot_ref_vs_ref(reference_seq_file, region, k, output, marker_size, create_legend_plot=False,
-                   create_facet_plots=True):
+def dot_ref_vs_ref(reference_seq_file, region, k, output, marker_size, create_legend_plot,
+                   create_facet_plots):
     ref_seq, ucsc_region = parse_ref(reference_seq_file, region)
     dp = dotplot(ref_seq, ref_seq, k)
 
@@ -335,17 +335,21 @@ def main():
     parser.add_argument("--output", help="the root output filename for the dotplot")
     parser.add_argument("--marker_size", type=float, default=0.25, help="the size of the markers in the dotplot")
     parser.add_argument("--min_indel", type=int, default=10, help="minimum indel size to show in dotplot")
+    # arguments for legend and facet plots that default to false
+    parser.add_argument("--legend", action="store_true", help="create a legend plot")
+    parser.add_argument("--facet", action="store_true", help="create facet plots")
+
     args = parser.parse_args()
     dot_ref_vs_ref(args.reference_genome, args.reference_region, args.k,
                    args.output + "." + get_file_name_from_ucsc_region(args.reference_region) + ".ref_v_ref",
-                   args.marker_size)
+                   args.marker_size, args.legend, args.facet)
     if args.bam:
         process_bam(args.reference_genome, args.reference_region, args.bam, args.bam_region, args.k, args.marker_size,
-                    args.output, args.min_indel)
+                    args.output, args.min_indel, args.legend, args.facet)
 
 
 def process_bam(reference_genome, reference_region, bam, bam_region, k, marker_size, output, min_indel,
-                create_legend_plot=False, create_facet_plots=True):
+                create_legend_plot, create_facet_plots):
     a = pysam.AlignmentFile(bam, "rb")
     ref_seq, ucsc_region = parse_ref(reference_genome, reference_region)
     # query the region
