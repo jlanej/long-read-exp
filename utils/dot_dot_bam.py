@@ -287,7 +287,7 @@ def get_sequence_from_fasta(fasta_file, ucsc_region):
 
 
 def dot_ref_vs_ref(reference_seq_file, region, k, output, marker_size, create_legend_plot=False,
-                   create_facet_plots=True):
+                   create_facet_plots=False):
     ref_seq, ucsc_region = parse_ref(reference_seq_file, region)
     dp = dotplot(ref_seq, ref_seq, k)
 
