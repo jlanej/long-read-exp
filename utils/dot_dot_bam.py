@@ -398,7 +398,8 @@ def process_bam(reference_genome, reference_region, bam, bam_region, k, marker_s
                 add_cigar_to_fig(ax, read, min_indel,
                                  ucsc_region)
                 save_plot(
-                    get_png_file_for_read(read, k, output).replace(".png", "." + DOT_COLORS[match_type][1] + ".png"))
+                    get_png_file_for_read(read, k, output).replace(".png", "." + DOT_COLORS[match_type][1] + ".png",
+                                                                   is_cigar=True))
 
         plt.close()
 
