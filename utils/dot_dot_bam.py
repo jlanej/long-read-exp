@@ -9,8 +9,8 @@ from pyfaidx import Fasta
 
 DOT_COLORS = {
     2: ["black", "palindrome"],
-    1: ["green", "forward match"],
-    -1: ["red", "reverse complement match"],
+    1: ["green", "forward"],
+    -1: ["red", "reverse"],
     0: ["white", "no match"]
 }
 
@@ -48,7 +48,7 @@ def get_sparse_subset_by_value(matrix, value):
     return matrix.mat == value
 
 
-def plot_dot(dpo, ax, label_x, label_y, start_x, start_y, heading, marker_size):
+def plot_dot(dpo, ax, label_x, label_y, start_x, start_y, heading, marker_size,match_types=[1,-1,2]):
     # create a new figure
     dp = dpo.mat
     # loop over the possible values in the matrix and plot them
@@ -286,9 +286,11 @@ def get_sequence_from_fasta(fasta_file, ucsc_region):
     return f[ucsc_region[0]][ucsc_region[1] - 1:ucsc_region[2]]
 
 
-def dot_ref_vs_ref(reference_seq_file, region, k, output, marker_size, create_legend_plot=False):
+def dot_ref_vs_ref(reference_seq_file, region, k, output, marker_size, create_legend_plot=False,
+                   create_facet_plots=True):
     ref_seq, ucsc_region = parse_ref(reference_seq_file, region)
     dp = dotplot(ref_seq, ref_seq, k)
+
     fig, ax = plt.subplots()
 
     ax = plot_dot(dp, ax, region, region, ucsc_region[1], ucsc_region[1],
@@ -299,6 +301,17 @@ def dot_ref_vs_ref(reference_seq_file, region, k, output, marker_size, create_le
         # Add a legend describing the colors
         add_legend(ax)
         save_plot(ax, output + ".k." + str(k) + ".legend.png")
+
+    if create_facet_plots:
+        for match_type in DOT_COLORS.keys():
+            if match_type == 0:
+                continue
+            fig, ax = plt.subplots()
+            ax = plot_dot(dp, ax, region, region, ucsc_region[1], ucsc_region[1],
+                          get_file_name_from_ucsc_region(region) + " vs " + get_file_name_from_ucsc_region(
+                              region) + "\nk=" + str(k) + " " + DOT_COLORS[match_type][1], marker_size, match_types=[match_type])
+            save_plot(ax, output + ".k." + str(k) + "." + DOT_COLORS[match_type][1] + ".png")
+#         create a plot for each type of match, forward, reverse, and palindrome
 
 
 def parse_ref(reference_seq_file, region):
@@ -319,14 +332,15 @@ def main():
     parser.add_argument("--reference_region", help="the reference region in the reference genome")
     parser.add_argument("--bam_region", help="the region in the bam file to plot")
     parser.add_argument("--output", help="the root output filename for the dotplot")
-    parser.add_argument("--marker_size", type=float, default=1, help="the size of the markers in the dotplot")
+    parser.add_argument("--marker_size", type=float, default=0.25, help="the size of the markers in the dotplot")
     parser.add_argument("--min_indel", type=int, default=10, help="minimum indel size to show in dotplot")
     args = parser.parse_args()
     dot_ref_vs_ref(args.reference_genome, args.reference_region, args.k,
                    args.output + "." + get_file_name_from_ucsc_region(args.reference_region) + ".ref_v_ref",
                    args.marker_size)
-    process_bam(args.reference_genome, args.reference_region, args.bam, args.bam_region, args.k, args.marker_size,
-                args.output, args.min_indel)
+    if args.bam:
+        process_bam(args.reference_genome, args.reference_region, args.bam, args.bam_region, args.k, args.marker_size,
+                    args.output, args.min_indel)
 
 
 def process_bam(reference_genome, reference_region, bam, bam_region, k, marker_size, output, min_indel,
