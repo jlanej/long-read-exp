@@ -391,9 +391,12 @@ def process_bam(reference_genome, reference_region, bam, bam_region, k, marker_s
                 if match_type == 0:
                     continue
                 fig, ax = plt.subplots()
-                plot_dot(dp, ax, reference_region, "read sequence index", ucsc_region[1], 0,
-                         read.query_name + " vs " + get_file_name_from_ucsc_region(reference_region) + "\nk=" + str(
-                             k) + " " + DOT_COLORS[match_type][1], marker_size, 1, match_types=[match_type])
+                ax = plot_dot(dp, ax, reference_region, "read sequence index", ucsc_region[1], 0,
+                              read.query_name + " vs " + get_file_name_from_ucsc_region(
+                                  reference_region) + "\nk=" + str(
+                                  k) + " " + DOT_COLORS[match_type][1], marker_size, 1, match_types=[match_type])
+                add_cigar_to_fig(ax, read, min_indel,
+                                 ucsc_region)
                 save_plot(
                     get_png_file_for_read(read, k, output).replace(".png", "." + DOT_COLORS[match_type][1] + ".png"))
 
