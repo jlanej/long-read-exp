@@ -326,18 +326,19 @@ def parse_ref(reference_seq_file, region):
 
 def main():
     # Define the command line arguments
-    parser = argparse.ArgumentParser(description="Generate a dotplot from two sequences in FASTA format.")
-    parser.add_argument("--k", type=int, help="kmer size")
-    parser.add_argument("--bam", help="the bam file of sequences")
+    parser = argparse.ArgumentParser(description="Generate a dotplot from reference sequence and a bam file")
+    parser.add_argument("--k", type=int, help="kmer size for the dotplot")
+    parser.add_argument("--bam", help="the bam file of sequences, must be indexed")
     parser.add_argument("--reference_genome", help="the reference genome in FASTA format")
     parser.add_argument("--reference_region", help="the reference region in the reference genome")
     parser.add_argument("--bam_region", help="the region in the bam file to plot")
     parser.add_argument("--output", help="the root output filename for the dotplot")
     parser.add_argument("--marker_size", type=float, default=0.25, help="the size of the markers in the dotplot")
-    parser.add_argument("--min_indel", type=int, default=10, help="minimum indel size to show in dotplot")
-    # arguments for legend and facet plots that default to false
-    parser.add_argument("--legend", action="store_true", help="create a legend plot")
-    parser.add_argument("--facet", action="store_true", help="create facet plots")
+    parser.add_argument("--min_indel", type=int, default=10,
+                        help="minimum indel size to show in dotplot as shaded region")
+    parser.add_argument("--legend", action="store_true", help="create a plot that includes a legend for the colors")
+    parser.add_argument("--facet", action="store_true",
+                        help="create facet plots for each match type( forward, reverse, palindrome)")
 
     args = parser.parse_args()
     dot_ref_vs_ref(args.reference_genome, args.reference_region, args.k,
