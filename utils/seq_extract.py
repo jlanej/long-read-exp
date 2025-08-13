@@ -1,7 +1,17 @@
 #!/usr/bin/env python3
+"""
+Extract sequences from primary alignments starting at the query base that maps to a given
+reference start coordinate, and keep reads that provide at least --length bases after that
+position (insertions are preserved).
+
+Assumptions:
+ - --start must correspond to a query position in the primary alignment (if start falls in a deletion
+   there is no corresponding query base and the read is skipped).
+ - --length refers to the number of query bases extracted (including inserted bases).
+ - Only primary alignments are used; supplementary and secondary alignments are skipped.
+"""
 import pysam
 import argparse
-from collections import defaultdict
 
 def get_sample_name(bam):
     samples = {rg.get("SM") for rg in bam.header.get("RG", []) if "SM" in rg}
@@ -12,172 +22,98 @@ def get_sample_name(bam):
         raise ValueError(f"Multiple sample names in BAM header: {samples}")
     return None
 
-def merge_intervals(intervals):
-    """Merge sorted intervals (start,end) and return merged list."""
-    if not intervals:
-        return []
-    intervals = sorted(intervals, key=lambda x: x[0])
-    merged = []
-    cur_s, cur_e = intervals[0]
-    for s, e in intervals[1:]:
-        if s <= cur_e:  # overlap or touch
-            cur_e = max(cur_e, e)
-        else:
-            merged.append((cur_s, cur_e))
-            cur_s, cur_e = s, e
-    merged.append((cur_s, cur_e))
-    return merged
+def find_qstart_for_ref_start(read, start_0):
+    """
+    Return the query position (qpos) that aligns to reference coordinate start_0 (exact equality),
+    or None if no such query position exists in this alignment.
+    """
+    try:
+        pairs = read.get_aligned_pairs(matches_only=False, with_seq=False)
+    except ValueError:
+        return None
 
-def intervals_cover_region(merged_intervals, start_0, end_0):
-    """Return True if union of merged_intervals covers [start_0, end_0) without gaps."""
-    if not merged_intervals:
-        return False
-    # merged_intervals assumed sorted and non-overlapping
-    # check starts at or before start_0 and ends at or after end_0 and no internal gap
-    s0, e0 = merged_intervals[0]
-    if s0 > start_0:
-        return False
-    cur_end = e0
-    for s, e in merged_intervals[1:]:
-        if s > cur_end:  # gap
-            return False
-        cur_end = max(cur_end, e)
-    return cur_end >= end_0
+    for qpos, rpos in pairs:
+        if rpos is None:
+            continue
+        if rpos == start_0:
+            return qpos  # may still be None, but get_aligned_pairs gives qpos for matches/insertions
+    return None
 
-def collect_aligned_pairs_for_read(alignments):
+def collect_sequence_after_qstart(read, q_start, length):
     """
-    Collect aligned_pairs from all alignments for a read.
-    Return dictionary qpos -> refpos (prefers non-None refpos if multiple entries).
+    Build the sequence in query order starting at q_start, using the read.query_sequence.
+    We include any query positions >= q_start that are part of the alignment (including insertions).
+    Stop once we collected >= length bases.
     """
-    q_to_r = {}
-    for aln in alignments:
-        try:
-            pairs = aln.get_aligned_pairs(matches_only=False, with_seq=False)
-        except ValueError:
-            pairs = []
-        for qpos, rpos in pairs:
-            if qpos is None:
-                # this is a pure deletion reference-only position - nothing to map to query
-                continue
-            if qpos not in q_to_r:
-                q_to_r[qpos] = rpos
-            else:
-                # prefer non-None refpos over None
-                if q_to_r[qpos] is None and rpos is not None:
-                    q_to_r[qpos] = rpos
-                # if both non-None and different, keep the first (rare)
-    return q_to_r
-
-def reconstruct_subsequence_from_qmap(q_to_r, query_sequence, start_0, end_0):
-    """
-    q_to_r: dict mapping query index -> ref index (ref index may be None)
-    Return subsequence built in query order:
-      - include bases where ref in [start, end)
-      - include insertion bases (ref None) if they are located between two ref positions with at least one inside [start,end)
-    """
-    if not q_to_r:
+    if read.query_sequence is None:
         return ""
 
-    # Build sorted list of (qpos, rpos) in ascending qpos
-    items = sorted(q_to_r.items(), key=lambda x: x[0])
-    qpos_list = [q for q, r in items]
-    rpos_list = [r for q, r in items]
+    # Build a set/list of qpos that appear in the aligned pairs (so we avoid taking soft-clipped trailing bases)
+    try:
+        pairs = read.get_aligned_pairs(matches_only=False, with_seq=False)
+    except ValueError:
+        return ""
 
-    # Precompute nearest previous non-none ref index for each position
-    prev_ref = [None] * len(items)
-    last = None
-    for i, r in enumerate(rpos_list):
-        if r is not None:
-            last = r
-        prev_ref[i] = last
+    # Collect all qpos that map in any way (including insertions: rpos can be None)
+    qpos_set = set()
+    for qpos, rpos in pairs:
+        if qpos is not None:
+            qpos_set.add(qpos)
 
-    # Precompute nearest next non-none ref index for each position
-    next_ref = [None] * len(items)
-    nxt = None
-    for i in range(len(items)-1, -1, -1):
-        if rpos_list[i] is not None:
-            nxt = rpos_list[i]
-        next_ref[i] = nxt
+    # Create sorted list of qpos in ascending query order that are >= q_start
+    qpos_list = sorted([q for q in qpos_set if q >= q_start])
 
-    subseq_chars = []
-    L = len(query_sequence)
-    for i, (qpos, rpos) in enumerate(items):
-        # safety check qpos in bounds
-        if qpos is None or qpos < 0 or qpos >= L:
+    # Build sequence until we reach desired length
+    seq_chunks = []
+    collected = 0
+    L = len(read.query_sequence)
+    for q in qpos_list:
+        if q < 0 or q >= L:
             continue
-        include = False
-        if rpos is not None:
-            if start_0 <= rpos < end_0:
-                include = True
-        else:
-            # insertion: include if either previous or next non-none ref pos falls within region
-            p = prev_ref[i]
-            n = next_ref[i]
-            if (p is not None and start_0 <= p < end_0) or (n is not None and start_0 <= n < end_0):
-                include = True
-        if include:
-            subseq_chars.append(query_sequence[qpos])
-    return "".join(subseq_chars)
+        seq_chunks.append(read.query_sequence[q])
+        collected += 1
+        if collected >= length:
+            break
 
-def extract_region_reads_merged(bam, chrom, start_0, end_0, sample_name):
-    """Merge primary + supplementary alignments by read, ensure coverage, and reconstruct sequences."""
-    # collect alignments that touch the region
-    reads_dict = defaultdict(list)
-    for read in bam.fetch(chrom, start_0, end_0):
-        if read.is_unmapped or read.is_secondary:
-            continue
-        # include primary and supplementary; store alignment objects
-        reads_dict[read.query_name].append(read)
-
-    for rname, alignments in reads_dict.items():
-        # compute merged reference intervals from the alignments
-        ref_intervals = [(a.reference_start, a.reference_end) for a in alignments if a.reference_start is not None]
-        if not ref_intervals:
-            continue
-        merged = merge_intervals(ref_intervals)
-        if not intervals_cover_region(merged, start_0, end_0):
-            # this read's alignments do not collectively span the region (there's a gap), skip
-            continue
-
-        # build qpos->refpos map across all alignments (query positions are global to read)
-        q_to_r = collect_aligned_pairs_for_read(alignments)
-
-        # reconstruct subsequence in query order, including insertions that sit inside region
-        # need query_sequence from any alignment (all alignments refer to same read)
-        query_sequence = None
-        for a in alignments:
-            if a.query_sequence:
-                query_sequence = a.query_sequence
-                break
-        if not query_sequence:
-            continue
-
-        subseq = reconstruct_subsequence_from_qmap(q_to_r, query_sequence, start_0, end_0)
-        if not subseq:
-            continue
-
-        rid = f"{sample_name}_{rname}" if sample_name else rname
-        yield f"{rid}_{len(subseq)}", subseq
+    return "".join(seq_chunks)
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Extract merged read sequences spanning a reference region (merge supplementary alignments)."
+        description="Extract sequences from primary alignments starting at the reference start coordinate."
     )
     parser.add_argument("-b", "--bam", required=True, help="Input BAM/CRAM (indexed)")
     parser.add_argument("-c", "--chrom", required=True, help="Reference contig name")
     parser.add_argument("-s", "--start", type=int, required=True, help="Start coordinate (1-based)")
-    parser.add_argument("-e", "--end", type=int, required=True, help="End coordinate (1-based, inclusive)")
-    parser.add_argument("--sample", help="Optional sample name (overrides BAM header)")
+    parser.add_argument("-l", "--length", type=int, required=True, help="Minimum length of bases to extract from the read (query-bases)")
+    parser.add_argument("--sample", help="Optional sample name to prepend to read IDs (overrides BAM header)")
     args = parser.parse_args()
 
     start_0 = args.start - 1
-    end_0 = args.end
+    required_len = args.length
 
     bam = pysam.AlignmentFile(args.bam, "rb")
     sample_name = args.sample if args.sample else get_sample_name(bam)
 
-    for read_id, seq in extract_region_reads_merged(bam, args.chrom, start_0, end_0, sample_name):
-        print(f">{read_id}\n{seq}")
+    # iterate reads that overlap the start position
+    for read in bam.fetch(args.chrom, start_0, start_0 + 1):
+        # skip unmapped or non-primary
+        if read.is_unmapped or read.is_supplementary or read.is_secondary:
+            continue
+
+        # find query position that maps exactly to start_0
+        qstart = find_qstart_for_ref_start(read, start_0)
+        if qstart is None:
+            # no query base aligns exactly to the reference start (start in deletion or not aligned here)
+            continue
+
+        seq = collect_sequence_after_qstart(read, qstart, required_len)
+        if not seq:
+            continue
+        if len(seq) < required_len:
+            continue  # skip reads that don't provide at least required_len bases starting at the anchor
+
+        rid = f"{sample_name}_{read.query_name}" if sample_name else read.query_name
+        print(f">{rid}_{len(seq)}\n{seq}")
 
     bam.close()
 
