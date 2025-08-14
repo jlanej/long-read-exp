@@ -1,4 +1,6 @@
 import argparse
+import os.path
+
 import numpy as np
 import matplotlib.pyplot as plt
 import pysam
@@ -105,7 +107,8 @@ def save_plot(ax, filename):
 def get_png_file_for_read(read, k, output, cigar=False):
     sanitized_read_name = read.query_name.replace("/", "_")
     output_read = output + "." + sanitized_read_name
-    cache_file = output_read + ".k." + str(k) + (".cigar" if cigar else "") + ".png"
+    num_alignments = len(get_all_alignments(read))
+    cache_file = output_read + ".k." + str(k) + (".cigar" if cigar else "") + ".n." + str(num_alignments) + ".png"
     return cache_file
 
 
@@ -350,6 +353,12 @@ def process_bam(args,create_legend_plot=False):
         if has_hard_clipping(read):
             print("skipping read ", read.query_name, " because it has hard clipping")
             continue
+        baseOutput = get_png_file_for_read(read, args.k, args.output)
+        # if the file already exists, skip
+        if os.path.exists(baseOutput):
+            print("skipping read ", read.query_name, " because file already exists: ", baseOutput)
+            continue
+
         dp = dot_read(args.reference_seq, read, args.k)
         fig, ax = plt.subplots()
         fig.tight_layout()

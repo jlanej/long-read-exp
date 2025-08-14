@@ -2,12 +2,13 @@
 """
 Extract sequences from primary alignments starting at the query base that maps to a given
 reference start coordinate, and keep reads that provide at least --length bases after that
-position (insertions are preserved).
+position (insertions are preserved). Extraction goes from the anchor base to the end of the
+read (including soft-clipped trailing bases).
 
 Assumptions:
  - --start must correspond to a query position in the primary alignment (if start falls in a deletion
    there is no corresponding query base and the read is skipped).
- - --length refers to the number of query bases extracted (including inserted bases).
+ - --length refers to the minimum number of query bases extracted (including inserted bases).
  - Only primary alignments are used; supplementary and secondary alignments are skipped.
 """
 import pysam
@@ -25,7 +26,7 @@ def get_sample_name(bam):
 def find_qstart_for_ref_start(read, start_0):
     """
     Return the query position (qpos) that aligns to reference coordinate start_0 (exact equality),
-    or None if no such query position exists in this alignment.
+    or None if no such query position exists in this alignment (e.g. start falls in a deletion).
     """
     try:
         pairs = read.get_aligned_pairs(matches_only=False, with_seq=False)
@@ -36,46 +37,27 @@ def find_qstart_for_ref_start(read, start_0):
         if rpos is None:
             continue
         if rpos == start_0:
-            return qpos  # may still be None, but get_aligned_pairs gives qpos for matches/insertions
+            return qpos  # If start is in a deletion this will be None -> handled by caller
     return None
 
-def collect_sequence_after_qstart(read, q_start, length):
+def collect_sequence_from_qstart_to_end(read, q_start):
     """
-    Build the sequence in query order starting at q_start, using the read.query_sequence.
-    We include any query positions >= q_start that are part of the alignment (including insertions).
-    Stop once we collected >= length bases.
+    Return the query sequence from q_start to the end of the read (includes soft-clipped bases).
+    If read.query_sequence is None or q_start is out of bounds, return an empty string.
     """
-    if read.query_sequence is None:
+    seq = read.query_sequence
+    if seq is None:
         return ""
 
-    # Build a set/list of qpos that appear in the aligned pairs (so we avoid taking soft-clipped trailing bases)
-    try:
-        pairs = read.get_aligned_pairs(matches_only=False, with_seq=False)
-    except ValueError:
+    if q_start is None:
         return ""
 
-    # Collect all qpos that map in any way (including insertions: rpos can be None)
-    qpos_set = set()
-    for qpos, rpos in pairs:
-        if qpos is not None:
-            qpos_set.add(qpos)
+    # q_start should be an int; make sure it's within the query sequence bounds
+    if q_start < 0 or q_start >= len(seq):
+        return ""
 
-    # Create sorted list of qpos in ascending query order that are >= q_start
-    qpos_list = sorted([q for q in qpos_set if q >= q_start])
-
-    # Build sequence until we reach desired length
-    seq_chunks = []
-    collected = 0
-    L = len(read.query_sequence)
-    for q in qpos_list:
-        if q < 0 or q >= L:
-            continue
-        seq_chunks.append(read.query_sequence[q])
-        collected += 1
-        if collected >= length:
-            break
-
-    return "".join(seq_chunks)
+    # Return from q_start to the end of the read (includes soft-clipped bases).
+    return seq[q_start:]
 
 def main():
     parser = argparse.ArgumentParser(
@@ -106,7 +88,7 @@ def main():
             # no query base aligns exactly to the reference start (start in deletion or not aligned here)
             continue
 
-        seq = collect_sequence_after_qstart(read, qstart, required_len)
+        seq = collect_sequence_from_qstart_to_end(read, qstart)
         if not seq:
             continue
         if len(seq) < required_len:
