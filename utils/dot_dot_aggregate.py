@@ -179,18 +179,29 @@ def aggregate_dot_matrices(reference_seq_file, comp_fasta_paths, k, palindrome_o
 def plot_aggregated_matrix(counts, output_png, title=None, cmap='viridis', vmax=None, logscale=False, label_prefix=None):
     """
     Plot heatmap of counts (2D numpy array). Saves to output_png.
+    Zeros are shown as transparent.
     """
-    # choose display array
     arr = counts.astype(np.float64)
     if logscale:
         arr = np.log1p(arr)
 
-    fig, ax = plt.subplots(figsize=(10,10))
-    im = ax.imshow(arr, origin='lower', interpolation='nearest', cmap=cmap, vmax=vmax)
+    # Mask zero values for transparency
+    masked_arr = np.ma.masked_where(arr == 0, arr)
+    if vmax is None:
+        vmax =np.percentile(masked_arr.compressed(), 99)
+    # Build colormap with transparent "under" color
+    base_cmap = plt.get_cmap(cmap)
+    cmap_with_transparency = base_cmap.copy()
+    cmap_with_transparency.set_bad(alpha=0)  # transparent for masked
+
+    fig, ax = plt.subplots(figsize=(10, 10))
+    im = ax.imshow(masked_arr, origin='lower', interpolation='nearest',
+                   cmap=cmap_with_transparency, vmax=vmax)
     cbar = fig.colorbar(im, ax=ax)
     cbar.set_label('log1p(counts)' if logscale else 'counts')
+
     if title is None:
-        title = f"Aggregated dot-matrix"
+        title = "Aggregated dot-matrix"
     if label_prefix:
         title = f"{label_prefix} - {title}"
     ax.set_title(title)
