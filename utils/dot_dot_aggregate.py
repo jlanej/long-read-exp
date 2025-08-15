@@ -3,10 +3,15 @@
 aggregate_dotplot.py
 
 Aggregate k-mer dot-matrices between a reference region FASTA and many "comp" FASTA files,
-summing **presence across samples** (each (comp_pos, ref_pos) counted at most once per sample/file).
+summing **presence across samples** (each (comp_bin, ref_bin) counted at most once per sample/file).
 
-Produces PNG images of aggregated counts (total / forward /reverse) using scatter plots (one dot per
-non-zero coordinate) and optionally saves numpy arrays (.npy).
+Produces PNG images of aggregated counts (total / forward / reverse) using scatter plots
+(one dot per non-zero binned coordinate) and optionally saves numpy arrays (.npy).
+
+New CLI options (binning):
+  --bin-size N         # same bin size for both axes
+  --bin-ref-size N     # bin size for reference axis only (overrides --bin-size for ref)
+  --bin-comp-size N    # bin size for comp axis only (overrides --bin-size for comp)
 
 Dependencies:
   - numpy
@@ -17,7 +22,7 @@ Dependencies:
 Install with:
   pip install numpy matplotlib wotplot tqdm
 
-Usage example:
+Example:
   python aggregate_dotplot.py \
     --reference ref_region.fasta \
     --comps "reads_dir/*.fasta" \
@@ -26,7 +31,8 @@ Usage example:
     --mode total,forward,reverse \
     --logscale \
     --palindrome-once \
-    --marker-size 12
+    --marker-size 12 \
+    --bin-size 5
 """
 import argparse
 import glob
@@ -34,7 +40,6 @@ from pathlib import Path
 import re
 import numpy as np
 import matplotlib.pyplot as plt
-import matplotlib.cm as cm
 import matplotlib as mpl
 import wotplot
 import sys
@@ -137,20 +142,19 @@ def compute_max_comp_k(comp_fasta_paths, k):
                 max_comp_k = comp_k
     return max_comp_k
 
-# ---------- aggregation ----------
-def aggregate_dot_matrices(reference_seq_file, comp_fasta_paths, k, palindrome_once=False, verbose=True):
+# ---------- aggregation with binning ----------
+def aggregate_dot_matrices(reference_seq_file, comp_fasta_paths, k,
+                           palindrome_once=False, verbose=True,
+                           bin_size_ref=1, bin_size_comp=1):
     """
-    Returns (forward_counts, reverse_counts, total_counts, ref_seq, comp_max_k)
-    Matrices shape: (comp_max_k, ref_k) such that rows index comp k-mer starts (0-based),
-    and columns index reference k-mer starts (0-based).
+    Returns (forward_counts, reverse_counts, total_counts, ref_seq, comp_bins)
+    Matrices shape: (comp_bins, ref_bins), where bins are non-overlapping windows
+    of width bin_size_comp (rows) and bin_size_ref (cols) over k-mer start indices.
 
     Counting behavior:
-      - For each comp FASTA file (treated as one "sample"), we mark whether a given
-        (comp_pos, ref_pos) coordinate had any forward match, any reverse match, or both,
-        across all sequences in that FASTA file.
-      - After processing the entire FASTA file, we increment the aggregated matrices by 1
-        for each coordinate that was observed in that sample in the appropriate matrix(es).
-      - This ensures each sample contributes at most +1 to each matrix cell.
+      - Each FASTA file is treated as a sample. For each sample we collect presence
+        of matches per raw coordinate, then map coordinates to bins, and then
+        increment each binned cell by at most +1 per sample (per forward/reverse/total).
     """
     # --- Read reference ---
     with open(reference_seq_file, "r") as fh:
@@ -167,11 +171,16 @@ def aggregate_dot_matrices(reference_seq_file, comp_fasta_paths, k, palindrome_o
 
     if verbose:
         print(f"Reference k-mers (ref_k) = {ref_k}; max comp k-mers (comp_max_k) = {comp_max_k}")
+        print(f"Binning: ref bin size = {bin_size_ref}; comp bin size = {bin_size_comp}")
 
-    # --- Initialize aggregated matrices with rows = comp_k, cols = ref_k ---
-    forward_counts = np.zeros((comp_max_k, ref_k), dtype=np.int32)
-    reverse_counts = np.zeros((comp_max_k, ref_k), dtype=np.int32)
-    total_counts = np.zeros((comp_max_k, ref_k), dtype=np.int32)
+    # compute number of bins (ceil division)
+    ref_bins = (ref_k + bin_size_ref - 1) // bin_size_ref
+    comp_bins = (comp_max_k + bin_size_comp - 1) // bin_size_comp
+
+    # --- Initialize aggregated binned matrices with rows = comp_bins, cols = ref_bins ---
+    forward_counts = np.zeros((comp_bins, ref_bins), dtype=np.int32)
+    reverse_counts = np.zeros((comp_bins, ref_bins), dtype=np.int32)
+    total_counts = np.zeros((comp_bins, ref_bins), dtype=np.int32)
 
     paths = gather_paths(comp_fasta_paths)
     if verbose:
@@ -182,9 +191,8 @@ def aggregate_dot_matrices(reference_seq_file, comp_fasta_paths, k, palindrome_o
         path_iter = tqdm(paths, desc="FASTA files")
 
     for fasta_path in path_iter:
-        # For this sample (fasta file) collect presence information:
-        # dict mapping (j_comp, i_ref) -> {'f':bool, 'r':bool}
-        sample_presence = {}
+        # per-sample binned presence map: (j_bin, i_bin) -> {'f':bool, 'r':bool}
+        sample_presence_bins = {}
 
         for hdr, comp_seq in iter_fasta_seqs(fasta_path):
             if comp_seq is None:
@@ -231,21 +239,22 @@ def aggregate_dot_matrices(reference_seq_file, comp_fasta_paths, k, palindrome_o
                 nz = np.nonzero(arr_mat)
                 nz_rows, nz_cols = nz[0], nz[1]
 
-            # Force vals into flat numpy array of ints
             vals = np.array(mat[nz_rows, nz_cols]).ravel()
 
-            # Update sample_presence for this FASTA file: mark forward/reverse presence per coordinate
+            # Map raw coords to bins and update sample_presence_bins
             for i_ref, j_comp, v in zip(nz_rows, nz_cols, vals):
-                # check bounds (defensive)
+                # defensive bounds
                 if j_comp < 0 or j_comp >= comp_max_k or i_ref < 0 or i_ref >= ref_k:
                     continue
-                coord = (j_comp, i_ref)
-                state = sample_presence.get(coord)
+                j_bin = j_comp // bin_size_comp
+                i_bin = i_ref // bin_size_ref
+                key = (j_bin, i_bin)
+                state = sample_presence_bins.get(key)
                 if state is None:
                     state = {"f": False, "r": False}
-                    sample_presence[coord] = state
+                    sample_presence_bins[key] = state
 
-                if v == 2:  # palindrome
+                if v == 2:
                     if palindrome_once:
                         state["f"] = True
                     else:
@@ -256,17 +265,16 @@ def aggregate_dot_matrices(reference_seq_file, comp_fasta_paths, k, palindrome_o
                 elif v == -1:
                     state["r"] = True
 
-        # After processing all sequences in this FASTA file, update aggregated matrices
-        for (j_comp, i_ref), state in sample_presence.items():
-            any_seen = state["f"] or state["r"]
-            if any_seen:
-                total_counts[j_comp, i_ref] += 1
+        # After processing the whole FASTA file, add +1 for each observed bin-state
+        for (j_bin, i_bin), state in sample_presence_bins.items():
+            if state["f"] or state["r"]:
+                total_counts[j_bin, i_bin] += 1
             if state["f"]:
-                forward_counts[j_comp, i_ref] += 1
+                forward_counts[j_bin, i_bin] += 1
             if state["r"]:
-                reverse_counts[j_comp, i_ref] += 1
+                reverse_counts[j_bin, i_bin] += 1
 
-    return forward_counts, reverse_counts, total_counts, ref_seq, comp_max_k
+    return forward_counts, reverse_counts, total_counts, ref_seq, comp_bins, ref_bins
 
 # ---------- plotting (scatter-only) ----------
 def plot_aggregated_matrix(counts, output_png, x_coords=None, title=None, cmap='viridis',
@@ -285,7 +293,7 @@ def plot_aggregated_matrix(counts, output_png, x_coords=None, title=None, cmap='
     # select non-zero entries
     nz_mask = arr > 0
     if not nz_mask.any():
-        # create an empty plot with titles/axes but no points
+        # empty plot
         nrows, ncols = arr.shape
         if figsize is None:
             width = min(max(4, ncols / 200 * 10), 20)
@@ -303,10 +311,10 @@ def plot_aggregated_matrix(counts, output_png, x_coords=None, title=None, cmap='
         print(f"Saved {output_png} (empty - no non-zero entries)")
         return
 
-    ys, xs = np.nonzero(nz_mask)  # ys: comp idx (row), xs: ref idx (col)
+    ys, xs = np.nonzero(nz_mask)  # ys: comp bin idx (row), xs: ref bin idx (col)
     values = arr[ys, xs]
 
-    # determine vmax robustly if not provided (use 99th percentile of values)
+    # determine vmax robustly if not provided (99th percentile)
     if vmax is None:
         try:
             auto_vmax = float(np.percentile(values, 99))
@@ -321,7 +329,6 @@ def plot_aggregated_matrix(counts, output_png, x_coords=None, title=None, cmap='
         vmax_use = vmax
 
     cmap_obj = plt.get_cmap(cmap)
-    # ensure colormap can handle "bad" values; not needed for scatter but keep robust behavior
     try:
         cmap_with_transparency = cmap_obj.copy()
     except Exception:
@@ -343,8 +350,6 @@ def plot_aggregated_matrix(counts, output_png, x_coords=None, title=None, cmap='
         figsize_use = figsize
 
     fig, ax = plt.subplots(figsize=figsize_use)
-
-    # scatter: x is reference index (col), y is comp index (row)
     sc = ax.scatter(xs, ys, c=values, cmap=cmap_with_transparency, s=marker_size, vmax=vmax_use, marker='s')
     cbar = fig.colorbar(sc, ax=ax)
     cbar.set_label('log1p(counts)' if logscale else 'counts')
@@ -366,7 +371,7 @@ def plot_aggregated_matrix(counts, output_png, x_coords=None, title=None, cmap='
     xticks = choose_ticks(ncols, max_ticks)
     yticks = choose_ticks(nrows, max_ticks)
 
-    # X tick labels: use x_coords (reference base starts) if provided, else 1-based indices
+    # X tick labels: use x_coords (reference bin centers) if provided, else 1-based bin indices
     if x_coords is not None:
         x_coords_arr = np.asarray(x_coords)
         if x_coords_arr.shape[0] != ncols:
@@ -378,7 +383,6 @@ def plot_aggregated_matrix(counts, output_png, x_coords=None, title=None, cmap='
         xtick_labels = [str(int(x) + 1) for x in xticks]
         ax.set_xlabel('reference k-mer start (1-based)')
 
-    # Y tick labels: comp k-mer start positions (1-based)
     ytick_labels = [str(int(y) + 1) for y in yticks]
     ax.set_ylabel(f'{y_label_prefix} k-mer start (1-based)')
 
@@ -387,10 +391,6 @@ def plot_aggregated_matrix(counts, output_png, x_coords=None, title=None, cmap='
     ax.set_yticks(yticks)
     ax.set_yticklabels(ytick_labels, fontsize=8)
 
-    # Invert y-axis to match imshow with origin='lower' semantics if desired.
-    # The scatter used here has origin at (0,0) bottom-left due to plotting indices as-is.
-    # Keep as-is so (0,0) is bottom-left similar to previous imshow(origin='lower') behavior.
-
     plt.tight_layout()
     plt.savefig(output_png, dpi=300, bbox_inches='tight')
     plt.close(fig)
@@ -398,7 +398,7 @@ def plot_aggregated_matrix(counts, output_png, x_coords=None, title=None, cmap='
 
 # ---------- CLI ----------
 def main():
-    parser = argparse.ArgumentParser(description="Aggregate k-mer dotplots across many comp FASTA files (scatter plots).")
+    parser = argparse.ArgumentParser(description="Aggregate k-mer dotplots across many comp FASTA files (scatter plots) with optional binning.")
     parser.add_argument("--reference", required=True, help="Reference FASTA (one sequence covering start+length region)")
     parser.add_argument("--comps", required=True,
                         help="Comma-separated list or glob of comp FASTA files (each may be multi-FASTA). "
@@ -415,7 +415,10 @@ def main():
                         help="Count palindromic matches (value==2) only once into forward (instead of both forward+reverse)")
     parser.add_argument("--no-npy", action="store_true", help="Do not save .npy files of aggregated matrices")
     parser.add_argument("--progress", action="store_true", help="Show tqdm progress bar when available")
-    parser.add_argument("--marker-size", type=float, default=0.01, help="Marker size (s) for scatter plot, in points^2")
+    parser.add_argument("--marker-size", type=float, default=20.0, help="Marker size (s) for scatter plot, in points^2")
+    parser.add_argument("--bin-size", type=int, default=None, help="Bin size applied to both ref and comp axes (overridden by axis-specific flags)")
+    parser.add_argument("--bin-ref-size", type=int, default=None, help="Bin size for reference axis (k-mer starts)")
+    parser.add_argument("--bin-comp-size", type=int, default=None, help="Bin size for comp axis (k-mer starts)")
     args = parser.parse_args()
 
     # respect --progress preference if tqdm is present
@@ -423,22 +426,52 @@ def main():
     if args.progress:
         HAVE_TQDM = True
 
+    # determine bin sizes (default 1 => no binning)
+    bin_size_ref = 1
+    bin_size_comp = 1
+    if args.bin_size is not None:
+        if args.bin_size < 1:
+            parser.error("--bin-size must be >= 1")
+        bin_size_ref = args.bin_size
+        bin_size_comp = args.bin_size
+    if args.bin_ref_size is not None:
+        if args.bin_ref_size < 1:
+            parser.error("--bin-ref-size must be >= 1")
+        bin_size_ref = args.bin_ref_size
+    if args.bin_comp_size is not None:
+        if args.bin_comp_size < 1:
+            parser.error("--bin-comp-size must be >= 1")
+        bin_size_comp = args.bin_comp_size
+
     modes = [m.strip().lower() for m in args.mode.split(",") if m.strip()]
     valid_modes = {"total", "forward", "reverse"}
     for m in modes:
         if m not in valid_modes:
             parser.error(f"Invalid mode: {m}. Choose subset of total,forward,reverse")
 
-    forward_counts, reverse_counts, total_counts, ref_seq, comp_max_k = aggregate_dot_matrices(
-        args.reference, args.comps, args.k, palindrome_once=args.palindrome_once, verbose=True)
+    forward_counts, reverse_counts, total_counts, ref_seq, comp_bins, ref_bins = aggregate_dot_matrices(
+        args.reference, args.comps, args.k, palindrome_once=args.palindrome_once, verbose=True,
+        bin_size_ref=bin_size_ref, bin_size_comp=bin_size_comp)
 
-    # derive x_coords (reference base starts) from filename if possible
+    # derive x_coords (reference bin centers) from filename if possible
     contig, ref_start, ref_end = parse_ref_coords_from_filename(args.reference)
     ref_k = len(ref_seq) - args.k + 1
+    # compute bin centers (1-based coordinates)
     if ref_start is not None:
-        x_coords = np.arange(ref_start, ref_start + ref_k)
+        # raw k-mer start coordinates (0-based): ref_start .. ref_start + ref_k - 1
+        raw_coords = np.arange(ref_start, ref_start + ref_k)
+        # take first element of each bin, then compute center
+        bin_starts = np.arange(0, ref_k, bin_size_ref)
+        bin_centers = []
+        for s in bin_starts:
+            # center in raw coordinates, using integer center
+            end = min(s + bin_size_ref - 1, ref_k - 1)
+            center_idx = s + (end - s) // 2
+            bin_centers.append(raw_coords[center_idx])
+        x_coords = np.array(bin_centers)
     else:
-        x_coords = np.arange(1, ref_k + 1)  # 1-based positions fallback
+        # no absolute coords; supply 1-based bin indices
+        x_coords = np.arange(1, ref_bins + 1)
 
     # Optionally apply threshold for plotting only (doesn't change saved arrays)
     def maybe_mask(arr):
@@ -455,9 +488,9 @@ def main():
             np.save(f"{outroot}.total.npy", total_counts)
         plot_aggregated_matrix(arr, f"{outroot}.total.png",
                                x_coords=x_coords,
-                               title=f"Total matches (k={args.k}) - {root_file_name_sans_dir(args.reference)}",
+                               title=f"Total matches (k={args.k}, bin_ref={bin_size_ref}, bin_comp={bin_size_comp}) - {root_file_name_sans_dir(args.reference)}",
                                cmap=args.cmap, vmax=args.vmax, logscale=args.logscale, label_prefix="Total",
-                               k=args.k, max_ticks=10, y_label_prefix="comp", marker_size=args.marker_size)
+                               k=args.k, max_ticks=10, y_label_prefix=f"comp (bin size={bin_size_comp})", marker_size=args.marker_size)
 
     if "forward" in modes:
         arr = maybe_mask(forward_counts)
@@ -465,9 +498,9 @@ def main():
             np.save(f"{outroot}.forward.npy", forward_counts)
         plot_aggregated_matrix(arr, f"{outroot}.forward.png",
                                x_coords=x_coords,
-                               title=f"Forward matches (k={args.k}) - {root_file_name_sans_dir(args.reference)}",
+                               title=f"Forward matches (k={args.k}, bin_ref={bin_size_ref}, bin_comp={bin_size_comp}) - {root_file_name_sans_dir(args.reference)}",
                                cmap=args.cmap, vmax=args.vmax, logscale=args.logscale, label_prefix="Forward",
-                               k=args.k, max_ticks=10, y_label_prefix="comp", marker_size=args.marker_size)
+                               k=args.k, max_ticks=10, y_label_prefix=f"comp (bin size={bin_size_comp})", marker_size=args.marker_size)
 
     if "reverse" in modes:
         arr = maybe_mask(reverse_counts)
@@ -475,9 +508,9 @@ def main():
             np.save(f"{outroot}.reverse.npy", reverse_counts)
         plot_aggregated_matrix(arr, f"{outroot}.reverse.png",
                                x_coords=x_coords,
-                               title=f"Reverse matches (k={args.k}) - {root_file_name_sans_dir(args.reference)}",
+                               title=f"Reverse matches (k={args.k}, bin_ref={bin_size_ref}, bin_comp={bin_size_comp}) - {root_file_name_sans_dir(args.reference)}",
                                cmap=args.cmap, vmax=args.vmax, logscale=args.logscale, label_prefix="Reverse",
-                               k=args.k, max_ticks=10, y_label_prefix="comp", marker_size=args.marker_size)
+                               k=args.k, max_ticks=10, y_label_prefix=f"comp (bin size={bin_size_comp})", marker_size=args.marker_size)
 
     print("Done.")
 
