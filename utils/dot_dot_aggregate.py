@@ -3,10 +3,10 @@
 aggregate_dotplot.py
 
 Aggregate k-mer dot-matrices between a reference region FASTA and many "comp" FASTA files,
-summing match counts across all comp sequences.
+summing **presence across samples** (each (comp_pos, ref_pos) counted at most once per sample/file).
 
-Produces PNG images of aggregated counts (total / forward / reverse) and optionally saves
-numpy arrays (.npy).
+Produces PNG images of aggregated counts (total / forward /reverse) using scatter plots (one dot per
+non-zero coordinate) and optionally saves numpy arrays (.npy).
 
 Dependencies:
   - numpy
@@ -25,7 +25,8 @@ Usage example:
     --output-root ref_region_agg \
     --mode total,forward,reverse \
     --logscale \
-    --palindrome-once
+    --palindrome-once \
+    --marker-size 12
 """
 import argparse
 import glob
@@ -142,6 +143,14 @@ def aggregate_dot_matrices(reference_seq_file, comp_fasta_paths, k, palindrome_o
     Returns (forward_counts, reverse_counts, total_counts, ref_seq, comp_max_k)
     Matrices shape: (comp_max_k, ref_k) such that rows index comp k-mer starts (0-based),
     and columns index reference k-mer starts (0-based).
+
+    Counting behavior:
+      - For each comp FASTA file (treated as one "sample"), we mark whether a given
+        (comp_pos, ref_pos) coordinate had any forward match, any reverse match, or both,
+        across all sequences in that FASTA file.
+      - After processing the entire FASTA file, we increment the aggregated matrices by 1
+        for each coordinate that was observed in that sample in the appropriate matrix(es).
+      - This ensures each sample contributes at most +1 to each matrix cell.
     """
     # --- Read reference ---
     with open(reference_seq_file, "r") as fh:
@@ -173,6 +182,10 @@ def aggregate_dot_matrices(reference_seq_file, comp_fasta_paths, k, palindrome_o
         path_iter = tqdm(paths, desc="FASTA files")
 
     for fasta_path in path_iter:
+        # For this sample (fasta file) collect presence information:
+        # dict mapping (j_comp, i_ref) -> {'f':bool, 'r':bool}
+        sample_presence = {}
+
         for hdr, comp_seq in iter_fasta_seqs(fasta_path):
             if comp_seq is None:
                 continue
@@ -189,29 +202,24 @@ def aggregate_dot_matrices(reference_seq_file, comp_fasta_paths, k, palindrome_o
                 print(f"Error computing DotPlotMatrix for {fasta_path}:{hdr} -> {e}", file=sys.stderr)
                 continue
 
-            mat = dp.mat  # mat orientation may be (ref_k, comp_k) or (comp_k, ref_k) depending on wotplot internals
+            mat = dp.mat  # mat orientation may be (ref_k, comp_k) or (comp_k, ref_k)
 
             # Convert sparse to CSR for efficient access if needed
             if hasattr(mat, "tocsc"):
                 mat = mat.tocsr()
 
             # Normalize orientation so rows == ref_k and cols == comp_k.
-            # Many DotPlotMatrix implementations return (ref_k, comp_k): rows=ref, cols=comp.
-            # We will try to ensure mat_ref_rows.shape[0] == ref_k.
             if mat.shape[0] != ref_k:
-                # If transposing would give desired shape, do it
                 if mat.shape[1] == ref_k:
                     mat = mat.T
                 else:
-                    # If neither dimension matches ref_k exactly, attempt to trim/reshape conservatively:
+                    # Attempt conservative trim
                     if mat.shape[0] > ref_k:
                         mat = mat[:ref_k, :]
                     elif mat.shape[1] > ref_k:
                         mat = mat[:, :ref_k]
-                    # After trimming we may still not match; we'll proceed but beware off-by-one.
 
-            # Now mat rows are (attempted) reference indices, columns comp indices.
-            # Truncate columns to comp_max_k if necessary (shouldn't be larger)
+            # Truncate columns to comp_max_k if necessary
             if mat.shape[1] > comp_max_k:
                 mat = mat[:, :comp_max_k]
 
@@ -219,7 +227,6 @@ def aggregate_dot_matrices(reference_seq_file, comp_fasta_paths, k, palindrome_o
             try:
                 nz_rows, nz_cols = mat.nonzero()  # nz_rows: reference idx, nz_cols: comp idx
             except Exception:
-                # If mat is dense numpy array:
                 arr_mat = np.asarray(mat)
                 nz = np.nonzero(arr_mat)
                 nz_rows, nz_cols = nz[0], nz[1]
@@ -227,81 +234,107 @@ def aggregate_dot_matrices(reference_seq_file, comp_fasta_paths, k, palindrome_o
             # Force vals into flat numpy array of ints
             vals = np.array(mat[nz_rows, nz_cols]).ravel()
 
-            # --- Increment counts: store as [comp_row, ref_col] to match requested axes layout ---
+            # Update sample_presence for this FASTA file: mark forward/reverse presence per coordinate
             for i_ref, j_comp, v in zip(nz_rows, nz_cols, vals):
                 # check bounds (defensive)
                 if j_comp < 0 or j_comp >= comp_max_k or i_ref < 0 or i_ref >= ref_k:
                     continue
-                total_counts[j_comp, i_ref] += 1
+                coord = (j_comp, i_ref)
+                state = sample_presence.get(coord)
+                if state is None:
+                    state = {"f": False, "r": False}
+                    sample_presence[coord] = state
+
                 if v == 2:  # palindrome
                     if palindrome_once:
-                        forward_counts[j_comp, i_ref] += 1
+                        state["f"] = True
                     else:
-                        forward_counts[j_comp, i_ref] += 1
-                        reverse_counts[j_comp, i_ref] += 1
+                        state["f"] = True
+                        state["r"] = True
                 elif v == 1:
-                    forward_counts[j_comp, i_ref] += 1
+                    state["f"] = True
                 elif v == -1:
-                    reverse_counts[j_comp, i_ref] += 1
+                    state["r"] = True
+
+        # After processing all sequences in this FASTA file, update aggregated matrices
+        for (j_comp, i_ref), state in sample_presence.items():
+            any_seen = state["f"] or state["r"]
+            if any_seen:
+                total_counts[j_comp, i_ref] += 1
+            if state["f"]:
+                forward_counts[j_comp, i_ref] += 1
+            if state["r"]:
+                reverse_counts[j_comp, i_ref] += 1
 
     return forward_counts, reverse_counts, total_counts, ref_seq, comp_max_k
 
-# ---------- plotting ----------
+# ---------- plotting (scatter-only) ----------
 def plot_aggregated_matrix(counts, output_png, x_coords=None, title=None, cmap='viridis',
                            vmax=None, logscale=False, label_prefix=None,
-                           k=None, max_ticks=10, figsize=None, y_label_prefix="comp"):
+                           k=None, max_ticks=10, figsize=None, y_label_prefix="comp",
+                           marker_size=20.0):
     """
-    Plot heatmap of counts with shape (comp_rows, ref_cols).
+    Plot scatter of counts with shape (comp_rows, ref_cols).
     - x_coords: iterable of reference start coordinates (length == ref_cols). If None, uses 1..ref_cols.
-    - y axis indexes comp k-mer start positions: we label those as 1-based start positions.
+    - marker_size: matplotlib scatter 's' parameter (area in points^2)
     """
     arr = counts.astype(np.float64)
     if logscale:
         arr = np.log1p(arr)
 
-    # Mask zero values for transparency
-    masked_arr = np.ma.masked_where(arr == 0, arr)
+    # select non-zero entries
+    nz_mask = arr > 0
+    if not nz_mask.any():
+        # create an empty plot with titles/axes but no points
+        nrows, ncols = arr.shape
+        if figsize is None:
+            width = min(max(4, ncols / 200 * 10), 20)
+            height = min(max(4, nrows / 200 * 10), 20)
+            figsize_use = (width, height)
+        else:
+            figsize_use = figsize
+        fig, ax = plt.subplots(figsize=figsize_use)
+        ax.set_title(label_prefix + " - " + (title or "Aggregated dot-matrix"))
+        ax.set_xlabel('reference k-mer start (1-based)' if x_coords is None else 'reference base (k-mer start, 1-based)')
+        ax.set_ylabel(f'{y_label_prefix} k-mer start (1-based)')
+        plt.tight_layout()
+        plt.savefig(output_png, dpi=300, bbox_inches='tight')
+        plt.close(fig)
+        print(f"Saved {output_png} (empty - no non-zero entries)")
+        return
 
-    # determine vmax robustly if not provided
+    ys, xs = np.nonzero(nz_mask)  # ys: comp idx (row), xs: ref idx (col)
+    values = arr[ys, xs]
+
+    # determine vmax robustly if not provided (use 99th percentile of values)
     if vmax is None:
         try:
-            data_vals = masked_arr.compressed()
-            if data_vals.size == 0:
+            auto_vmax = float(np.percentile(values, 99))
+            if auto_vmax <= 0:
+                auto_vmax = float(values.max())
+            if auto_vmax <= 0:
                 auto_vmax = 1.0
-            else:
-                auto_vmax = float(np.percentile(data_vals, 99))
         except Exception:
-            auto_vmax = 1.0
+            auto_vmax = float(values.max()) if values.size else 1.0
         vmax_use = auto_vmax
     else:
         vmax_use = vmax
 
-    # Use plt.get_cmap (more robust across mpl versions/environments)
     cmap_obj = plt.get_cmap(cmap)
-
-    # Try to make a local copy so we can set masked values transparent.
-    # Not all colormap objects implement .copy(), so fall back to creating
-    # a ListedColormap sampled from the source cmap.
+    # ensure colormap can handle "bad" values; not needed for scatter but keep robust behavior
     try:
         cmap_with_transparency = cmap_obj.copy()
     except Exception:
         try:
-            # sample 256 colors and build a ListedColormap
             colors = cmap_obj(np.linspace(0, 1, 256))
             cmap_with_transparency = mpl.colors.ListedColormap(colors)
         except Exception:
-            # last resort: use original cmap object
             cmap_with_transparency = cmap_obj
 
-    # Set masked ("bad") values to transparent if supported
     if hasattr(cmap_with_transparency, "set_bad"):
         cmap_with_transparency.set_bad(alpha=0.0)
-    else:
-        # if not supported, we continue without transparency for masked values
-        pass
 
-    nrows, ncols = masked_arr.shape
-
+    nrows, ncols = arr.shape
     if figsize is None:
         width = min(max(4, ncols / 200 * 10), 20)
         height = min(max(4, nrows / 200 * 10), 20)
@@ -310,17 +343,18 @@ def plot_aggregated_matrix(counts, output_png, x_coords=None, title=None, cmap='
         figsize_use = figsize
 
     fig, ax = plt.subplots(figsize=figsize_use)
-    im = ax.imshow(masked_arr, origin='lower', interpolation='nearest',
-                   cmap=cmap_with_transparency, vmax=vmax_use, aspect='auto')
 
-    cbar = fig.colorbar(im, ax=ax)
+    # scatter: x is reference index (col), y is comp index (row)
+    sc = ax.scatter(xs, ys, c=values, cmap=cmap_with_transparency, s=marker_size, vmax=vmax_use, marker='s')
+    cbar = fig.colorbar(sc, ax=ax)
     cbar.set_label('log1p(counts)' if logscale else 'counts')
 
     if title is None:
         title = "Aggregated dot-matrix"
     if label_prefix:
-        title = f"{label_prefix} - {title}"
-    ax.set_title(title)
+        ax.set_title(f"{label_prefix} - {title}")
+    else:
+        ax.set_title(title)
 
     # tick placement helper
     def choose_ticks(n, max_ticks):
@@ -353,6 +387,10 @@ def plot_aggregated_matrix(counts, output_png, x_coords=None, title=None, cmap='
     ax.set_yticks(yticks)
     ax.set_yticklabels(ytick_labels, fontsize=8)
 
+    # Invert y-axis to match imshow with origin='lower' semantics if desired.
+    # The scatter used here has origin at (0,0) bottom-left due to plotting indices as-is.
+    # Keep as-is so (0,0) is bottom-left similar to previous imshow(origin='lower') behavior.
+
     plt.tight_layout()
     plt.savefig(output_png, dpi=300, bbox_inches='tight')
     plt.close(fig)
@@ -360,7 +398,7 @@ def plot_aggregated_matrix(counts, output_png, x_coords=None, title=None, cmap='
 
 # ---------- CLI ----------
 def main():
-    parser = argparse.ArgumentParser(description="Aggregate k-mer dotplots across many comp FASTA files.")
+    parser = argparse.ArgumentParser(description="Aggregate k-mer dotplots across many comp FASTA files (scatter plots).")
     parser.add_argument("--reference", required=True, help="Reference FASTA (one sequence covering start+length region)")
     parser.add_argument("--comps", required=True,
                         help="Comma-separated list or glob of comp FASTA files (each may be multi-FASTA). "
@@ -370,13 +408,14 @@ def main():
     parser.add_argument("--mode", default="total,forward,reverse",
                         help="Which matrices to produce/plot. Comma-separated subset of: total,forward,reverse")
     parser.add_argument("--cmap", default="viridis", help="Matplotlib colormap")
-    parser.add_argument("--vmax", type=float, default=None, help="Optional vmax for imshow color scale")
+    parser.add_argument("--vmax", type=float, default=None, help="Optional vmax for scatter color scale")
     parser.add_argument("--logscale", action="store_true", help="Plot on log(1+x) scale")
     parser.add_argument("--threshold", type=int, default=None, help="Optional threshold to mask low counts (for plotting only)")
     parser.add_argument("--palindrome-once", action="store_true",
                         help="Count palindromic matches (value==2) only once into forward (instead of both forward+reverse)")
     parser.add_argument("--no-npy", action="store_true", help="Do not save .npy files of aggregated matrices")
     parser.add_argument("--progress", action="store_true", help="Show tqdm progress bar when available")
+    parser.add_argument("--marker-size", type=float, default=0.01, help="Marker size (s) for scatter plot, in points^2")
     args = parser.parse_args()
 
     # respect --progress preference if tqdm is present
@@ -404,13 +443,11 @@ def main():
     # Optionally apply threshold for plotting only (doesn't change saved arrays)
     def maybe_mask(arr):
         if args.threshold is not None:
-            mask = arr < args.threshold
             a = arr.copy()
-            a[mask] = 0
+            a[a < args.threshold] = 0
             return a
         return arr
 
-    # Save and plot requested modes
     outroot = args.output_root
     if "total" in modes:
         arr = maybe_mask(total_counts)
@@ -420,7 +457,7 @@ def main():
                                x_coords=x_coords,
                                title=f"Total matches (k={args.k}) - {root_file_name_sans_dir(args.reference)}",
                                cmap=args.cmap, vmax=args.vmax, logscale=args.logscale, label_prefix="Total",
-                               k=args.k, max_ticks=10, y_label_prefix="comp")
+                               k=args.k, max_ticks=10, y_label_prefix="comp", marker_size=args.marker_size)
 
     if "forward" in modes:
         arr = maybe_mask(forward_counts)
@@ -430,7 +467,7 @@ def main():
                                x_coords=x_coords,
                                title=f"Forward matches (k={args.k}) - {root_file_name_sans_dir(args.reference)}",
                                cmap=args.cmap, vmax=args.vmax, logscale=args.logscale, label_prefix="Forward",
-                               k=args.k, max_ticks=10, y_label_prefix="comp")
+                               k=args.k, max_ticks=10, y_label_prefix="comp", marker_size=args.marker_size)
 
     if "reverse" in modes:
         arr = maybe_mask(reverse_counts)
@@ -440,7 +477,7 @@ def main():
                                x_coords=x_coords,
                                title=f"Reverse matches (k={args.k}) - {root_file_name_sans_dir(args.reference)}",
                                cmap=args.cmap, vmax=args.vmax, logscale=args.logscale, label_prefix="Reverse",
-                               k=args.k, max_ticks=10, y_label_prefix="comp")
+                               k=args.k, max_ticks=10, y_label_prefix="comp", marker_size=args.marker_size)
 
     print("Done.")
 
