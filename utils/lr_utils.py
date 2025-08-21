@@ -253,7 +253,7 @@ def get_best_hap_for_read(read_id, read_name_to_cigar_metrics):
 
 
 def cluster_haplotypes(gr1, gr2, read_name_to_cigar_metrics, output_file):
-    print('Clustering haplotypes')
+    print('Generating haplotype histogram metrics')
 
     print(read_name_to_cigar_metrics)
 
@@ -264,27 +264,80 @@ def cluster_haplotypes(gr1, gr2, read_name_to_cigar_metrics, output_file):
 
     row_colors = [legend_colors[0] if best_hap == 1 else legend_colors[1] if best_hap == 2 else 'black' for best_hap in
                   read_name_to_cigar_metrics['best_hap']]
-    cm = plot_h_clust(legend_colors, legend_labels, read_name_to_cigar_metrics_to_plot, row_colors,
-                      'Read haplotype match metrics')
+    fig = plot_histogram_metrics(legend_colors, legend_labels, read_name_to_cigar_metrics_to_plot, row_colors,
+                                'Read haplotype match metrics')
 
     print("saving figure to " + output_file)
-    plt.gcf().set_size_inches(10, 10)
+    fig.set_size_inches(12, 10)
     plt.savefig(output_file, dpi=300, bbox_inches='tight')
 
 
-def plot_h_clust(legend_colors, legend_labels, read_name_to_cigar_metrics_to_plot, row_colors, title):
-    cm = sns.clustermap(read_name_to_cigar_metrics_to_plot, metric="euclidean", cmap="viridis",
-                        xticklabels=True, yticklabels=False,
-                        dendrogram_ratio=(0.35, 0.15),  # fraction of the figure dedicated to row and column dendrograms
-                        row_colors=row_colors,
-                        col_cluster=False,
-                        cbar_pos=[.4, .9, .5, .03],  # x, y, width, height in "figure coordinates"
-                        cbar_kws={'orientation': "horizontal"})
-    # create a legend, use the row dendogram for positioning
-    legend_handles = [plt.Rectangle((0, 0), 0, 0, color=color, label=label)
-                      for color, label in zip(legend_colors, legend_labels)]
-    cm.ax_row_dendrogram.legend(title='Row Colors', handles=legend_handles, loc='lower left', bbox_to_anchor=(0, 1.02))
-    # add a title
-    cm.fig.suptitle(title)
-
-    return cm
+def plot_histogram_metrics(legend_colors, legend_labels, read_name_to_cigar_metrics_to_plot, row_colors, title):
+    """
+    Create histogram plots showing the distribution of haplotype metrics.
+    This provides a sense of base-rate distance background against distances of events.
+    """
+    # Create subplots for histograms
+    fig, axes = plt.subplots(2, 2, figsize=(12, 10))
+    fig.suptitle(title, fontsize=16)
+    
+    # Get the data
+    hap1_data = read_name_to_cigar_metrics_to_plot['hap1_prop']
+    hap2_data = read_name_to_cigar_metrics_to_plot['hap2_prop']
+    
+    # Calculate the difference between haplotype proportions (distance metric)
+    hap_diff = hap2_data - hap1_data
+    
+    # Separate data by assignment for colored histograms
+    hap1_assigned = hap1_data[pd.Series(row_colors) == legend_colors[0]]
+    hap1_assigned_hap2 = hap2_data[pd.Series(row_colors) == legend_colors[0]]
+    hap2_assigned = hap1_data[pd.Series(row_colors) == legend_colors[1]]
+    hap2_assigned_hap2 = hap2_data[pd.Series(row_colors) == legend_colors[1]]
+    
+    # Plot 1: Haplotype 1 proportions distribution
+    axes[0, 0].hist(hap1_assigned, bins=30, alpha=0.7, color=legend_colors[0], label=legend_labels[0])
+    axes[0, 0].hist(hap2_assigned, bins=30, alpha=0.7, color=legend_colors[1], label=legend_labels[1])
+    axes[0, 0].set_xlabel('Haplotype 1 Proportion')
+    axes[0, 0].set_ylabel('Frequency')
+    axes[0, 0].set_title('Distribution of Haplotype 1 Proportions')
+    axes[0, 0].legend()
+    axes[0, 0].grid(True, alpha=0.3)
+    
+    # Plot 2: Haplotype 2 proportions distribution
+    axes[0, 1].hist(hap1_assigned_hap2, bins=30, alpha=0.7, color=legend_colors[0], label=legend_labels[0])
+    axes[0, 1].hist(hap2_assigned_hap2, bins=30, alpha=0.7, color=legend_colors[1], label=legend_labels[1])
+    axes[0, 1].set_xlabel('Haplotype 2 Proportion')
+    axes[0, 1].set_ylabel('Frequency')
+    axes[0, 1].set_title('Distribution of Haplotype 2 Proportions')
+    axes[0, 1].legend()
+    axes[0, 1].grid(True, alpha=0.3)
+    
+    # Plot 3: Difference between haplotype proportions (distance background)
+    axes[1, 0].hist(hap_diff, bins=30, alpha=0.7, color='steelblue', edgecolor='black')
+    axes[1, 0].set_xlabel('Haplotype Proportion Difference (H2 - H1)')
+    axes[1, 0].set_ylabel('Frequency')
+    axes[1, 0].set_title('Distribution of Haplotype Proportion Differences')
+    axes[1, 0].axvline(x=0, color='red', linestyle='--', alpha=0.7, label='Equal proportions')
+    axes[1, 0].legend()
+    axes[1, 0].grid(True, alpha=0.3)
+    
+    # Plot 4: Combined scatter with density background
+    axes[1, 1].scatter(hap1_data, hap2_data, c=row_colors, alpha=0.6, s=20)
+    axes[1, 1].set_xlabel('Haplotype 1 Proportion')
+    axes[1, 1].set_ylabel('Haplotype 2 Proportion')
+    axes[1, 1].set_title('Haplotype Proportions Scatter Plot')
+    
+    # Add diagonal line for equal proportions
+    max_val = max(hap1_data.max(), hap2_data.max())
+    axes[1, 1].plot([0, max_val], [0, max_val], 'r--', alpha=0.7, label='Equal proportions')
+    axes[1, 1].legend()
+    axes[1, 1].grid(True, alpha=0.3)
+    
+    # Create custom legend for colors
+    legend_handles = [plt.Line2D([0], [0], marker='o', color='w', markerfacecolor=color, 
+                                markersize=8, label=label) 
+                     for color, label in zip(legend_colors, legend_labels)]
+    fig.legend(handles=legend_handles, loc='upper right', bbox_to_anchor=(0.98, 0.95))
+    
+    plt.tight_layout()
+    return fig
