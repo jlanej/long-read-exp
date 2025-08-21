@@ -27,7 +27,10 @@ from Bio import SeqIO
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+import seaborn as sns
 from scipy.cluster.vq import kmeans2
+from scipy.cluster.hierarchy import linkage, dendrogram
+from scipy.stats import zscore
 
 def rc(seq):
     tbl = str.maketrans("ACGTNacgtn","TGCANtgcan")
@@ -100,6 +103,11 @@ def choose_anchors(seqs, k=31, presence=0.90, single_copy_fraction=0.95, max_anc
             "present_frac": kmer_presence[km]/n,
             "single_copy_frac": kmer_singlecopy_ok[km]/kmer_presence[km]
         })
+    
+    if len(rows) == 0:
+        print(f"No anchors found with presence >= {presence} and single_copy_frac >= {single_copy_fraction}", file=sys.stderr)
+        return pd.DataFrame(columns=["kmer","present_in","single_copy_ok","present_frac","single_copy_frac"]), perseq_pos, perseq_multi
+    
     anchors_df = pd.DataFrame(rows).sort_values(["present_in","single_copy_frac"], ascending=[False,False])
     return anchors_df, perseq_pos, perseq_multi
 
@@ -182,6 +190,215 @@ def score_bimodality_and_call(df_pair):
     mapping = dict(zip(df_pair["id"].dropna(), arr_labels))
     return stats, mapping
 
+def create_enhanced_heatmap(M, row_ids_sorted, col_labels, calls_df, pair_df, top_pairs, out_prefix):
+    """
+    Create enhanced heatmaps with better visualization and deletion highlighting.
+    """
+    # Set up the plotting style
+    plt.style.use('default')
+    sns.set_palette("viridis")
+    
+    # Create figure with multiple subplots
+    fig, axes = plt.subplots(2, 2, figsize=(16, 12))
+    fig.suptitle('Enhanced K-mer Anchor Distance Analysis', fontsize=16, fontweight='bold')
+    
+    # 1. Enhanced distance heatmap with better color scheme
+    ax1 = axes[0, 0]
+    
+    # Create mask for NaN values
+    mask = np.isnan(M)
+    
+    # Use seaborn heatmap for better visualization
+    sns.heatmap(M, 
+                mask=mask,
+                cmap='viridis',
+                cbar_kws={'label': 'Inter-anchor distance (bp)'},
+                xticklabels=[f"Pair {i}" for i in col_labels],
+                yticklabels=False,  # Too many samples to show labels
+                ax=ax1,
+                robust=True)
+    
+    ax1.set_title('Distance Heatmap (Raw Values)', fontweight='bold')
+    ax1.set_xlabel('Anchor Pairs')
+    ax1.set_ylabel('Samples (sorted by deletion call)')
+    
+    # 2. Z-score normalized heatmap to highlight patterns
+    ax2 = axes[0, 1]
+    
+    # Calculate z-scores column-wise (per anchor pair)
+    M_zscore = np.full_like(M, np.nan)
+    for j in range(M.shape[1]):
+        col_data = M[:, j]
+        valid_data = col_data[~np.isnan(col_data)]
+        if len(valid_data) > 1:
+            z_scores = zscore(valid_data)
+            M_zscore[~np.isnan(col_data), j] = z_scores
+    
+    mask_z = np.isnan(M_zscore)
+    sns.heatmap(M_zscore,
+                mask=mask_z,
+                cmap='RdBu_r',
+                center=0,
+                cbar_kws={'label': 'Z-score'},
+                xticklabels=[f"Pair {i}" for i in col_labels],
+                yticklabels=False,
+                ax=ax2,
+                vmin=-3, vmax=3)
+    
+    ax2.set_title('Z-score Normalized Distances', fontweight='bold')
+    ax2.set_xlabel('Anchor Pairs')
+    ax2.set_ylabel('Samples')
+    
+    # 3. Binary deletion calls heatmap
+    ax3 = axes[1, 0]
+    
+    # Create binary matrix based on calls
+    call_order = [row_ids_sorted[i] for i in range(len(row_ids_sorted))]
+    binary_matrix = np.full((len(call_order), len(top_pairs)), np.nan)
+    
+    for i, sample_id in enumerate(call_order):
+        sample_call = calls_df[calls_df['id'] == sample_id]['call'].values
+        if len(sample_call) > 0:
+            call = sample_call[0]
+            for j in range(len(top_pairs)):
+                if call == 'deletion':
+                    binary_matrix[i, j] = 1
+                elif call == 'no_deletion':
+                    binary_matrix[i, j] = 0
+                else:  # unknown
+                    binary_matrix[i, j] = 0.5
+    
+    # Custom colormap for binary calls
+    colors = ['#2E8B57', '#FFE4B5', '#DC143C']  # no_deletion, unknown, deletion
+    custom_cmap = sns.blend_palette(colors, n_colors=100, as_cmap=True)
+    
+    mask_binary = np.isnan(binary_matrix)
+    sns.heatmap(binary_matrix,
+                mask=mask_binary,
+                cmap=custom_cmap,
+                cbar_kws={'label': 'Deletion Call', 
+                         'ticks': [0, 0.5, 1],
+                         'format': plt.FuncFormatter(lambda x, p: {0: 'No Deletion', 0.5: 'Unknown', 1: 'Deletion'}[x])},
+                xticklabels=[f"Pair {i}" for i in col_labels],
+                yticklabels=False,
+                ax=ax3,
+                vmin=0, vmax=1)
+    
+    ax3.set_title('Deletion Calls by Sample', fontweight='bold')
+    ax3.set_xlabel('Anchor Pairs')
+    ax3.set_ylabel('Samples')
+    
+    # 4. Distance distribution plot highlighting deletions
+    ax4 = axes[1, 1]
+    
+    # Get the best discriminating pair (first one)
+    if len(top_pairs) > 0:
+        best_pair_idx = top_pairs[0]
+        best_pair_distances = M[:, 0]  # First column corresponds to best pair
+        
+        # Separate deletion vs no-deletion samples
+        deletion_distances = []
+        no_deletion_distances = []
+        
+        for i, sample_id in enumerate(call_order):
+            sample_call = calls_df[calls_df['id'] == sample_id]['call'].values
+            if len(sample_call) > 0 and not np.isnan(best_pair_distances[i]):
+                call = sample_call[0]
+                if call == 'deletion':
+                    deletion_distances.append(best_pair_distances[i])
+                elif call == 'no_deletion':
+                    no_deletion_distances.append(best_pair_distances[i])
+        
+        # Create histogram
+        bins = np.linspace(np.nanmin(best_pair_distances), np.nanmax(best_pair_distances), 30)
+        
+        ax4.hist(no_deletion_distances, bins=bins, alpha=0.7, label='No Deletion', 
+                color='#2E8B57', density=True)
+        ax4.hist(deletion_distances, bins=bins, alpha=0.7, label='Deletion', 
+                color='#DC143C', density=True)
+        
+        ax4.set_xlabel('Distance (bp)')
+        ax4.set_ylabel('Density')
+        ax4.set_title(f'Distance Distribution (Best Pair {best_pair_idx})', fontweight='bold')
+        ax4.legend()
+        ax4.grid(True, alpha=0.3)
+        
+        # Add vertical lines for cluster centers if available
+        best_stats = pair_df[pair_df['pair_idx'] == best_pair_idx]
+        if len(best_stats) > 0:
+            short_center = best_stats['short_center'].iloc[0]
+            long_center = best_stats['long_center'].iloc[0]
+            ax4.axvline(short_center, color='red', linestyle='--', alpha=0.8, 
+                       label=f'Short Center ({short_center:.0f} bp)')
+            ax4.axvline(long_center, color='green', linestyle='--', alpha=0.8,
+                       label=f'Long Center ({long_center:.0f} bp)')
+            ax4.legend()
+    
+    plt.tight_layout()
+    plt.savefig(f"{out_prefix}_enhanced_heatmap.png", dpi=300, bbox_inches='tight')
+    plt.close()
+    print(f"Wrote {out_prefix}_enhanced_heatmap.png", file=sys.stderr)
+
+def create_summary_plots(pair_df, calls_df, out_prefix):
+    """
+    Create summary plots showing overall statistics and patterns.
+    """
+    fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+    fig.suptitle('K-mer Anchor Analysis Summary', fontsize=16, fontweight='bold')
+    
+    # 1. Pair separation vs standard deviation
+    ax1 = axes[0, 0]
+    scatter = ax1.scatter(pair_df['separation'], pair_df['std'], 
+                         c=pair_df['frac_short'], cmap='RdYlBu_r',
+                         alpha=0.7, s=60)
+    ax1.set_xlabel('Separation (bp)')
+    ax1.set_ylabel('Standard Deviation')
+    ax1.set_title('Pair Quality Metrics')
+    ax1.grid(True, alpha=0.3)
+    plt.colorbar(scatter, ax=ax1, label='Fraction with Deletions')
+    
+    # 2. Distribution of separation distances
+    ax2 = axes[0, 1]
+    ax2.hist(pair_df['separation'], bins=20, alpha=0.7, color='skyblue', edgecolor='black')
+    ax2.set_xlabel('Separation Distance (bp)')
+    ax2.set_ylabel('Number of Pairs')
+    ax2.set_title('Distribution of Pair Separations')
+    ax2.grid(True, alpha=0.3)
+    
+    # 3. Deletion call summary
+    ax3 = axes[1, 0]
+    call_counts = calls_df['call'].value_counts()
+    colors = {'deletion': '#DC143C', 'no_deletion': '#2E8B57', 'unknown': '#FFE4B5'}
+    pie_colors = [colors.get(call, 'gray') for call in call_counts.index]
+    
+    ax3.pie(call_counts.values, labels=call_counts.index, autopct='%1.1f%%',
+           colors=pie_colors, startangle=90)
+    ax3.set_title('Deletion Call Summary')
+    
+    # 4. Top pairs ranking
+    ax4 = axes[1, 1]
+    top_10 = pair_df.head(10).copy()
+    top_10['rank'] = range(1, len(top_10) + 1)
+    
+    bars = ax4.bar(top_10['rank'], top_10['separation'], 
+                   color=plt.cm.viridis(top_10['frac_short']))
+    ax4.set_xlabel('Pair Rank')
+    ax4.set_ylabel('Separation (bp)')
+    ax4.set_title('Top 10 Discriminative Pairs')
+    ax4.set_xticks(top_10['rank'])
+    ax4.grid(True, alpha=0.3)
+    
+    # Add text annotations for separation values
+    for i, bar in enumerate(bars):
+        height = bar.get_height()
+        ax4.text(bar.get_x() + bar.get_width()/2., height + height*0.01,
+                f'{int(height)}', ha='center', va='bottom', fontsize=8)
+    
+    plt.tight_layout()
+    plt.savefig(f"{out_prefix}_summary_plots.png", dpi=300, bbox_inches='tight')
+    plt.close()
+    print(f"Wrote {out_prefix}_summary_plots.png", file=sys.stderr)
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--seqs", required=True, help="multi-fasta of ~250 sequences")
@@ -192,6 +409,8 @@ def main():
     ap.add_argument("--pair-stride", type=int, default=1, help="compute distances between anchor i and i+stride")
     ap.add_argument("--heatmap-top", type=int, default=50, help="plot top-N discriminative pairs")
     ap.add_argument("--out-prefix", default="pos_agnostic")
+    ap.add_argument("--enhanced-plots", action="store_true", help="create enhanced diagnostic plots with better visualizations")
+    ap.add_argument("--basic-plots-only", action="store_true", help="create only the basic distance heatmap (legacy mode)")
     args = ap.parse_args()
 
     seqs = load_sequences(args.seqs)
@@ -266,15 +485,29 @@ def main():
     M = M[order,:]
     row_ids_sorted = [row_ids[i] for i in order]
 
-    plt.figure(figsize=(max(8, len(top_pairs)*0.25), max(6, len(row_ids_sorted)*0.02)))
-    plt.imshow(M, aspect='auto', interpolation='nearest')
-    plt.colorbar(label="Inter-anchor distance (bp)")
-    plt.xlabel("Top bimodal anchor pairs (index)")
-    plt.ylabel("Samples (sorted by call)")
-    plt.title("Aligner-free, position-agnostic deletion signal via k-mer anchors")
-    plt.tight_layout()
-    plt.savefig(args.out_prefix + "_distance_heatmap.png", dpi=200)
-    print("Wrote distance_heatmap.png", file=sys.stderr)
+    # Create plots based on command line options
+    if not args.basic_plots_only:
+        # Create enhanced diagnostic plots by default
+        if len(pair_stats) > 0:
+            create_enhanced_heatmap(M, row_ids_sorted, col_labels, calls_df, pair_df, top_pairs, args.out_prefix)
+            create_summary_plots(pair_df, calls_df, args.out_prefix)
+        else:
+            print("No bimodal pairs found - creating basic plots only", file=sys.stderr)
+        
+        if args.enhanced_plots:
+            print("Enhanced plots already created as default", file=sys.stderr)
+
+    # Always create the basic plot for backward compatibility, unless enhanced-only mode
+    if args.basic_plots_only or not args.enhanced_plots or len(pair_stats) == 0:
+        plt.figure(figsize=(max(8, len(top_pairs)*0.25), max(6, len(row_ids_sorted)*0.02)))
+        plt.imshow(M, aspect='auto', interpolation='nearest')
+        plt.colorbar(label="Inter-anchor distance (bp)")
+        plt.xlabel("Top bimodal anchor pairs (index)")
+        plt.ylabel("Samples (sorted by call)")
+        plt.title("Aligner-free, position-agnostic deletion signal via k-mer anchors")
+        plt.tight_layout()
+        plt.savefig(args.out_prefix + "_distance_heatmap.png", dpi=200)
+        print("Wrote distance_heatmap.png", file=sys.stderr)
 
 if __name__ == "__main__":
     main()
