@@ -12,13 +12,22 @@ Position-agnostic, aligner-free deletion discovery via conserved k-mer anchors.
   5) Score each anchor pair for bimodality: check variance & a simple dip-like metric;
      call a "short" cluster vs "long" cluster via 1D k-means (k=2).
   6) Pick the best-discriminating pair; call per-sample deletion if assigned to "short" cluster.
-  7) Plot distance heatmap (samples x anchor-pairs).
+  7) Plot distance heatmap (samples x anchor-pairs) with enhanced visualizations.
 
 Outputs:
   - anchors.csv
   - pair_calls.csv
   - sample_calls.csv
-  - distance_heatmap.png
+  - distance_heatmap.png (basic plot)
+  - enhanced_heatmap.png (multi-panel diagnostic plot with deletion highlighting)
+  - summary_plots.png (statistical overview plots)
+
+Enhanced plotting features:
+  - Multi-panel heatmap showing raw distances, z-scores, deletion calls, and distributions
+  - Color-coded deletion events (red) vs normal samples (green)
+  - Statistical overlays showing cluster centers and separation metrics
+  - Summary plots with pair quality metrics and deletion call statistics
+  - Backward compatible with original basic plotting mode
 """
 
 import argparse, sys, math
