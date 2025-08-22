@@ -276,5 +276,40 @@ def main():
     plt.savefig(args.out_prefix + "_distance_heatmap.png", dpi=200)
     print("Wrote distance_heatmap.png", file=sys.stderr)
 
+    # Histograms for the top-N bimodal pairs
+    top_pairs = pair_df.head(args.heatmap_top)["pair_idx"].tolist()
+
+    ncols = 3
+    nrows = int(math.ceil(len(top_pairs) / ncols))
+    fig, axes = plt.subplots(nrows, ncols, figsize=(5*ncols, 4*nrows))
+    axes = axes.flatten()
+
+    for ax, pidx in zip(axes, top_pairs):
+        sub = dist_df[dist_df["pair_idx"] == pidx].dropna(subset=["distance"])
+        sub = sub.merge(calls_df[["id", "call"]], on="id", how="left")
+
+        # Plot histogram of all distances
+        ax.hist(sub["distance"], bins=50, alpha=0.6, color="gray", label="all samples")
+
+        # Overlay deletion distances as vertical red lines
+        del_dists = sub[sub["call"]=="deletion"]["distance"].values
+        for d in del_dists:
+            ax.axvline(d, color="red", linestyle="--", linewidth=1.2, alpha=0.8)
+
+        a = sub["anchor_a"].iloc[0]
+        b = sub["anchor_b"].iloc[0]
+        ax.set_title(f"Pair {pidx}\n{a[:6]}… → {b[:6]}…")
+        ax.set_xlabel("Distance (bp)")
+        ax.set_ylabel("Count")
+
+    # Remove unused axes
+    for ax in axes[len(top_pairs):]:
+        ax.axis("off")
+
+    fig.suptitle(f"Distance distributions for top {len(top_pairs)} bimodal anchor pairs", fontsize=14)
+    plt.tight_layout(rect=[0, 0, 1, 0.97])
+    plt.savefig(args.out_prefix + "_distance_histograms.png", dpi=200)
+    print("Wrote distance_histograms.png", file=sys.stderr)
+
 if __name__ == "__main__":
     main()
