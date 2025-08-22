@@ -281,7 +281,7 @@ def main():
 
     ncols = 3
     nrows = int(math.ceil(len(top_pairs) / ncols))
-    fig, axes = plt.subplots(nrows, ncols, figsize=(5*ncols, 4*nrows))
+    fig, axes = plt.subplots(nrows, ncols, figsize=(5 * ncols, 4 * nrows))
     axes = axes.flatten()
 
     for ax, pidx in zip(axes, top_pairs):
@@ -291,18 +291,21 @@ def main():
         # Plot histogram of all distances
         ax.hist(sub["distance"], bins=50, alpha=0.6, color="gray", label="all samples")
 
-        # Overlay deletion distances as vertical red lines
-        del_dists = sub[sub["call"]=="deletion"]["distance"].values
-        for d in del_dists:
-            ax.axvline(d, color="red", linestyle="--", linewidth=1.2, alpha=0.8)
+        # Overlay deletion distances
+        del_dists = sub[sub["call"] == "deletion"]["distance"].values
+        if len(del_dists) > 0:
+            for d in del_dists:
+                ax.axvline(d, color="red", linestyle="--", linewidth=1.2, alpha=0.8)
 
-        a = sub["anchor_a"].iloc[0]
-        b = sub["anchor_b"].iloc[0]
-        ax.set_title(f"Pair {pidx}\n{a[:6]}… → {b[:6]}…")
+        # Use anchor names from dist_df
+        a = dist_df.loc[dist_df["pair_idx"] == pidx, "anchor_a"].iloc[0]
+        b = dist_df.loc[dist_df["pair_idx"] == pidx, "anchor_b"].iloc[0]
+
+        ax.set_title(f"Pair {pidx}: {a[:6]}… → {b[:6]}…")
         ax.set_xlabel("Distance (bp)")
         ax.set_ylabel("Count")
 
-    # Remove unused axes
+    # Hide unused axes
     for ax in axes[len(top_pairs):]:
         ax.axis("off")
 
@@ -310,6 +313,52 @@ def main():
     plt.tight_layout(rect=[0, 0, 1, 0.97])
     plt.savefig(args.out_prefix + "_distance_histograms.png", dpi=200)
     print("Wrote distance_histograms.png", file=sys.stderr)
+
+    # -----------------------
+    # Scatter + Heatmap of anchor-pair distance variability (no npz saving)
+    # -----------------------
+
+    # Build mapping of anchor -> median_pos (from ordered_df)
+    anchor_to_pos = dict(zip(ordered_df["kmer"], ordered_df["median_pos"]))
+
+    # 1) Scatterplot: one point per pair_idx present in dist_df
+    scatter_rows = []
+    for idx, sub in dist_df.groupby("pair_idx"):
+        dists = sub["distance"].dropna().values.astype(float)
+        if len(dists) < 2:
+            continue
+        stdv = float(np.std(dists))
+        a = sub["anchor_a"].iloc[0]
+        b = sub["anchor_b"].iloc[0]
+        if a not in anchor_to_pos or b not in anchor_to_pos:
+            continue
+        pos_a = anchor_to_pos[a]
+        pos_b = anchor_to_pos[b]
+        scatter_rows.append((pos_a, pos_b, stdv, idx, a, b))
+
+    if len(scatter_rows) == 0:
+        print("No anchor pairs with enough data to plot scatter/heatmap.", file=sys.stderr)
+    else:
+        X = np.array([r[0] for r in scatter_rows])
+        Y = np.array([r[1] for r in scatter_rows])
+        C = np.array([r[2] for r in scatter_rows])
+
+        plt.figure(figsize=(8,8))
+        sc = plt.scatter(X, Y, c=C, cmap="viridis", s=45, edgecolors="k", linewidths=0.2)
+        cb = plt.colorbar(sc)
+        cb.set_label("Std. dev. of inter-anchor distance (bp)")
+        plt.xlabel("Anchor A median position (bp)")
+        plt.ylabel("Anchor B median position (bp)")
+        plt.title("Anchor-pair variability (std of distances)")
+        plt.grid(alpha=0.2)
+        plt.tight_layout()
+        out_scatter = args.out_prefix + "_anchorpair_variability_scatter.png"
+        plt.savefig(out_scatter, dpi=300)
+        plt.close()
+        print(f"Wrote {out_scatter}", file=sys.stderr)
+
+
+
 
 if __name__ == "__main__":
     main()
