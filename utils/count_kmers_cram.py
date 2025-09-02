@@ -70,6 +70,12 @@ def main():
         "--out",
         help="Output TSV file (kmer\\tcount). If omitted, prints to stdout.",
     )
+    parser.add_argument(
+        "--min-count",
+        type=int,
+        default=1,
+        help="Only report k-mers with at least this count (default: 1).",
+    )
     args = parser.parse_args()
 
     counts = count_kmers_in_cram(
@@ -80,13 +86,15 @@ def main():
         region=args.region,
     )
 
-    # Output results
+    # Output results with filtering
+    output_lines = ((k, c) for k, c in counts.most_common() if c >= args.min_count)
+
     if args.out:
         with open(args.out, "w") as fh:
-            for kmer, count in counts.most_common():
+            for kmer, count in output_lines:
                 fh.write(f"{kmer}\t{count}\n")
     else:
-        for kmer, count in counts.most_common():
+        for kmer, count in output_lines:
             print(f"{kmer}\t{count}")
 
 if __name__ == "__main__":
